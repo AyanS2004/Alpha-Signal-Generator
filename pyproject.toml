@@ -1,0 +1,51 @@
+[build-system]
+requires = ["setuptools>=65", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "alpha-signal-engine"
+version = "0.1.0"
+description = "Production-ready trading signal generation and backtesting engine with CLI and API"
+readme = "README.md"
+requires-python = ">=3.9"
+license = {text = "MIT"}
+authors = [{ name = "Alpha Signal" }]
+dependencies = [
+  "pandas>=1.5.0",
+  "numpy>=1.21.0",
+  "scipy>=1.9.0",
+  "matplotlib>=3.5.0",
+  "seaborn>=0.11.0",
+  "plotly>=5.0.0",
+  "yfinance>=0.1.87",
+  "alpha-vantage>=2.3.1",
+  "scikit-learn>=1.1.0",
+  "numba>=0.56.0",
+  "python-dateutil>=2.8.0",
+  "pytz>=2022.1",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=7", "black>=22", "flake8>=5", "mypy>=1.4"]
+api = ["Flask==2.3.0", "Flask-CORS==4.0.0", "gunicorn>=21.2.0"]
+indicators = ["ta-lib>=0.4.24"]
+
+[project.scripts]
+alpha-signal = "alpha_signal_engine.cli:main"
+
+[tool.black]
+line-length = 100
+
+[tool.flake8]
+max-line-length = 100
+extend-ignore = ["E203", "W503"]
+
+[tool.pytest.ini_options]
+addopts = "-q"
+testpaths = ["tests"]
+
+[tool.setuptools.packages.find]
+include = ["alpha_signal_engine*"]
+exclude = ["frontend*", "backend*"]
+
+

@@ -1,0 +1,25 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: dark;
+}
+
+body {
+  @apply bg-[#0a0a0a] text-gray-100;
+}
+
+.card {
+  @apply bg-[#111213] border border-zinc-800 rounded-xl shadow-card;
+}
+
+.kpi {
+  @apply p-4 md:p-5 rounded-xl bg-[#0f1115] border border-zinc-800;
+}
+
+.gradient-text {
+  @apply bg-gradient-to-r from-brand-teal to-brand-blue bg-clip-text text-transparent;
+}
+
+

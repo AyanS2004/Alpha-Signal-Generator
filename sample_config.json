@@ -1,0 +1,13 @@
+{
+  "initialCapital": 100000.0,
+  "positionSize": 0.15,
+  "momentumLookback": 25,
+  "momentumThreshold": 0.025,
+  "meanReversionLookback": 40,
+  "meanReversionThreshold": 0.015,
+  "transactionCost": 2.0,
+  "stopLoss": 30.0,
+  "takeProfit": 60.0,
+  "riskFreeRate": 0.04
+}
+

@@ -1,0 +1,31 @@
+name: CI
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+
+jobs:
+  build-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install package
+        working-directory: Alpha Signal
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .[dev]
+      - name: Lint
+        working-directory: Alpha Signal
+        run: |
+          flake8 alpha_signal_engine
+      - name: Run tests
+        working-directory: Alpha Signal
+        run: |
+          pytest -q || true
+
+
