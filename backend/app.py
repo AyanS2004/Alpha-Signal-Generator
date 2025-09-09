@@ -21,6 +21,7 @@ if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
 from alpha_signal_engine import AlphaSignalEngine, Config
+from alpha_signal_engine.visualizer import Visualizer
 import os
 
 app = Flask(__name__)
@@ -38,6 +39,74 @@ engine = None
 # Realtime globals
 ALPACA_FEED = None
 ALPACA_SYMBOL = None
+
+# Settings file
+SETTINGS_FILE = os.path.join(os.path.dirname(__file__), 'settings.json')
+
+def _load_settings():
+    try:
+        if os.path.exists(SETTINGS_FILE):
+            with open(SETTINGS_FILE, 'r', encoding='utf-8') as f:
+                return json.load(f)
+    except Exception:
+        pass
+    # defaults
+    return {
+        'initialCapital': 100000,
+        'positionSize': 0.1,
+        'transactionCost': 1.0,
+        'stopLoss': 50,
+        'takeProfit': 100,
+        'momentumLookback': 20,
+        'momentumThreshold': 0.02,
+        'meanReversionLookback': 50,
+        'meanReversionThreshold': 0.01,
+        'autoTrading': False,
+        'notifications': True,
+        'dataRetention': 30,
+        'riskManagement': True,
+        'apiKey': '',
+        'apiSecret': '',
+        'dataProvider': 'alpha_vantage',
+    }
+
+def _save_settings(settings: dict):
+    tmp = SETTINGS_FILE + '.tmp'
+    with open(tmp, 'w', encoding='utf-8') as f:
+        json.dump(settings, f, indent=2)
+    os.replace(tmp, SETTINGS_FILE)
+
+def _compute_trades_list(results: dict, signals_df: pd.DataFrame) -> list:
+    try:
+        trades_arr = results.get('trades')
+        equity = results.get('equity')
+        pnl = results.get('pnl')
+        prices = signals_df['Close'].values
+        index = signals_df.index
+        trades = []
+        entry_idx = None
+        entry_price = None
+        for i, t in enumerate(trades_arr):
+            if t == 1 and entry_idx is None:
+                entry_idx = i
+                entry_price = float(prices[i])
+            elif t == -1 and entry_idx is not None:
+                exit_price = float(prices[i])
+                realized_pnl = float(pnl[i]) if i < len(pnl) else float((exit_price - entry_price))
+                ret = (exit_price - entry_price) / entry_price if entry_price else 0.0
+                trades.append({
+                    'entryDate': str(index[entry_idx]) if entry_idx < len(index) else str(entry_idx),
+                    'exitDate': str(index[i]) if i < len(index) else str(i),
+                    'entryPrice': entry_price if entry_price is not None else 0.0,
+                    'exitPrice': exit_price,
+                    'pnl': realized_pnl,
+                    'return': ret,
+                })
+                entry_idx = None
+                entry_price = None
+        return trades
+    except Exception:
+        return []
 
 def convert_numpy_types(obj):
     """Convert numpy types to JSON-serializable types."""
@@ -147,6 +216,7 @@ def run_backtest():
             )
             
             # Convert numpy types and format results for frontend
+            trades_list = _compute_trades_list(results['backtest_results'], results['signals'])
             backtest_data = {
                 'totalReturn': float(results['backtest_summary']['total_return'] * 100),
                 'sharpeRatio': float(results['backtest_summary']['sharpe_ratio']),
@@ -169,7 +239,8 @@ def run_backtest():
                         results['signals']['Close']
                     ))
                     if signal != 0
-                ][:10]  # Limit to first 10 signals
+                ][:10],  # Limit to first 10 signals
+                'trades': trades_list[:10]
             }
             
             logger.info("backtest:success", extra={"total_trades": backtest_data['totalTrades']})
@@ -238,6 +309,7 @@ def run_custom_backtest():
             )
             
             # Convert all numpy types and format results
+            trades_list = _compute_trades_list(results['backtest_results'], results['signals'])
             backtest_data = {
                 'symbol': symbol,
                 'startDate': start_date,
@@ -271,17 +343,7 @@ def run_custom_backtest():
                     ))
                     if signal != 0
                 ][:20],  # Limit to first 20 signals
-                'trades': [
-                    {
-                        'entryDate': str(trade.get('entry_date', '')),
-                        'exitDate': str(trade.get('exit_date', '')),
-                        'entryPrice': float(trade.get('entry_price', 0)),
-                        'exitPrice': float(trade.get('exit_price', 0)),
-                        'pnl': float(trade.get('pnl', 0)),
-                        'return': float(trade.get('return', 0))
-                    }
-                    for trade in results.get('trades', [])
-                ][:10]  # Limit to first 10 trades
+                'trades': trades_list[:10]
             }
             
             logger.info("custom_backtest:success", extra={
@@ -437,12 +499,49 @@ def realtime_latest():
         if ALPACA_FEED is None:
             return jsonify({'connected': False})
 
+        # Build a richer payload that may include a simple live signal and confidence
+        latest = None
         if hasattr(ALPACA_FEED, 'get_latest'):
-            tick = ALPACA_FEED.get_latest()
-            return jsonify({'connected': tick is not None, 'tick': tick})
+            latest = ALPACA_FEED.get_latest()
         elif hasattr(ALPACA_FEED, 'get_current_data'):
-            data = ALPACA_FEED.get_current_data()
-            return jsonify({'connected': data.get('is_connected', False), 'tick': data})
+            latest = ALPACA_FEED.get_current_data()
+
+        if not latest:
+            return jsonify({'connected': False})
+
+        # Try to access indicators if available from simulated feed
+        signal = None
+        confidence = None
+        try:
+            # Prefer simulated RealTimeDataFeed indicators
+            if hasattr(ALPACA_FEED, 'latest_indicators'):
+                ind = getattr(ALPACA_FEED, 'latest_indicators') or {}
+                sma_10 = ind.get('sma_10')
+                sma_20 = ind.get('sma_20')
+                price = (latest.get('price') if isinstance(latest, dict) else None) or ind.get('sma_10')
+                if sma_10 is not None and sma_20 is not None:
+                    if sma_10 > sma_20:
+                        signal = 'BUY'
+                    elif sma_10 < sma_20:
+                        signal = 'SELL'
+                    else:
+                        signal = 'HOLD'
+                    # Confidence as normalized SMA spread
+                    spread = abs(sma_10 - sma_20)
+                    denom = (sma_10 + sma_20) / 2 or 1.0
+                    confidence = max(0.0, min(0.99, spread / denom * 10))
+        except Exception:
+            pass
+
+        resp = {
+            'connected': True,
+            'tick': latest,
+        }
+        if signal is not None:
+            resp['signal'] = signal
+        if confidence is not None:
+            resp['confidence'] = confidence
+        return jsonify(resp)
 
         return jsonify({'connected': False})
     except Exception as e:
@@ -477,27 +576,7 @@ def search_stocks():
 def get_settings():
     """Get current settings."""
     try:
-        # Return default settings
-        settings = {
-            'initialCapital': 100000,
-            'positionSize': 0.1,
-            'transactionCost': 1.0,
-            'stopLoss': 50,
-            'takeProfit': 100,
-            'momentumLookback': 20,
-            'momentumThreshold': 0.02,
-            'meanReversionLookback': 50,
-            'meanReversionThreshold': 0.01,
-            'autoTrading': False,
-            'notifications': True,
-            'dataRetention': 30,
-            'riskManagement': True,
-            'apiKey': '',
-            'apiSecret': '',
-            'dataProvider': 'alpha_vantage',
-            'demo': True
-        }
-        
+        settings = _load_settings()
         return jsonify(settings)
         
     except Exception as e:
@@ -507,15 +586,9 @@ def get_settings():
 def save_settings():
     """Save settings."""
     try:
-        settings = request.json
-        
-        # Here you would typically save to database or config file
-        # For now, just return success
-        
-        return jsonify({
-            'status': 'saved',
-            'message': 'Settings saved successfully'
-        })
+        settings = request.json or {}
+        _save_settings(settings)
+        return jsonify({'status': 'saved'})
         
     except Exception as e:
         return jsonify({'error': str(e)}), 500
@@ -571,6 +644,48 @@ def download_results():
             
     except Exception as e:
         logger.exception("download_results:error")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/risk/metrics', methods=['GET'])
+def risk_metrics():
+    """Return last computed risk/performance metrics."""
+    try:
+        global engine
+        if engine is None or engine.get_performance_metrics() is None:
+            return jsonify({'error': 'No metrics available. Run a backtest first.'}), 400
+        return jsonify(convert_numpy_types(engine.get_performance_metrics()))
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/risk/plots', methods=['GET'])
+def risk_plots():
+    """Generate and send risk and trading plots as a zip."""
+    try:
+        global engine
+        if engine is None or engine.get_backtest_results() is None:
+            return jsonify({'error': 'No results available. Run a backtest first.'}), 400
+        # Generate plots to temp files
+        vis = Visualizer(engine.config)
+        tmpdir = tempfile.mkdtemp()
+        perf_png = os.path.join(tmpdir, 'performance.png')
+        sig_png = os.path.join(tmpdir, 'signals.png')
+        risk_png = os.path.join(tmpdir, 'risk.png')
+        trade_png = os.path.join(tmpdir, 'trading.png')
+        vis.plot_performance(engine.get_signals(), engine.get_backtest_results(), save_path=perf_png, show_plot=False)
+        vis.plot_signal_analysis(engine.get_signals(), save_path=sig_png, show_plot=False)
+        vis.plot_risk_metrics(engine.get_performance_metrics(), save_path=risk_png, show_plot=False)
+        vis.plot_trading_activity(engine.get_signals(), engine.get_backtest_results(), save_path=trade_png, show_plot=False)
+        # Zip them
+        import zipfile
+        zip_path = os.path.join(tmpdir, 'risk_plots.zip')
+        with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zf:
+            zf.write(perf_png, arcname='performance.png')
+            zf.write(sig_png, arcname='signals.png')
+            zf.write(risk_png, arcname='risk.png')
+            zf.write(trade_png, arcname='trading.png')
+        return send_file(zip_path, as_attachment=True, download_name='risk_plots.zip')
+    except Exception as e:
+        logger.exception('risk_plots:error')
         return jsonify({'error': str(e)}), 500
 
 if __name__ == '__main__':

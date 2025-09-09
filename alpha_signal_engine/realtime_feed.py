@@ -223,9 +223,26 @@ class RealTimeDataFeed:
         df = pd.DataFrame(self.data_buffer)
         df.set_index('timestamp', inplace=True)
         
-        # Calculate indicators (this would be more sophisticated in production)
-        # For now, just ensure we have enough data
-        pass
+        # Calculate basic indicators for real-time display/use
+        try:
+            df['return'] = df['close'].pct_change()
+            df['sma_10'] = df['close'].rolling(window=10, min_periods=10).mean()
+            df['sma_20'] = df['close'].rolling(window=20, min_periods=20).mean()
+            # Simple RSI (Wilder's smoothing approximation)
+            delta = df['close'].diff()
+            gain = (delta.clip(lower=0)).ewm(alpha=1/14, adjust=False).mean()
+            loss = (-delta.clip(upper=0)).ewm(alpha=1/14, adjust=False).mean()
+            rs = gain / (loss.replace(0, np.nan))
+            df['rsi_14'] = 100 - (100 / (1 + rs))
+        except Exception:
+            return
+        
+        # Store latest indicators on the instance for quick access if needed
+        self.latest_indicators = {
+            'sma_10': float(df['sma_10'].iloc[-1]) if not np.isnan(df['sma_10'].iloc[-1]) else None,
+            'sma_20': float(df['sma_20'].iloc[-1]) if not np.isnan(df['sma_20'].iloc[-1]) else None,
+            'rsi_14': float(df['rsi_14'].iloc[-1]) if not np.isnan(df['rsi_14'].iloc[-1]) else None,
+        }
     
     def get_current_data(self) -> Dict:
         """Get current market data."""

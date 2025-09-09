@@ -136,9 +136,9 @@ class AlphaSignalApp:
         
         print("⏳ Waiting for servers to start...")
         
-        # Wait for backend
+        # Wait for backend (can take a bit on first run due to deps)
         backend_ready = False
-        for i in range(30):  # Wait up to 30 seconds
+        for i in range(60):  # Wait up to 60 seconds
             try:
                 response = http_get("http://localhost:5000/api/health", timeout=1)
                 if is_ok(response):
@@ -152,11 +152,12 @@ class AlphaSignalApp:
             print("❌ Backend server failed to start")
             return False
         
-        # Wait for frontend
+        # Wait for frontend (CRA can take a while on first compile)
         frontend_ready = False
-        for i in range(30):  # Wait up to 30 seconds
+        for i in range(180):  # Wait up to 180 seconds
             try:
-                response = http_get("http://localhost:3000", timeout=1)
+                response = http_get("http://localhost:3000", timeout=2)
+                # Accept typical ready responses
                 if is_ok(response):
                     frontend_ready = True
                     print("✅ Frontend server is ready!")

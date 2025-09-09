@@ -22,7 +22,7 @@ class Config:
     # Momentum strategy parameters
     momentum_lookback: int = 20
     momentum_threshold: float = 0.02  # 2% price change
-    momentum_volume_threshold: float = 1.5  # 1.5x average volume
+    momentum_volume_threshold: float = 1.2  # relaxed volume confirmation (was 1.5)
     
     # Mean reversion strategy parameters
     mean_reversion_lookback: int = 50
@@ -45,6 +45,9 @@ class Config:
     
     # Numba optimization
     use_numba: bool = True
+
+    # Signal combination
+    final_signal_threshold: float = 0.3  # lower threshold to increase entries (was 0.5 implicit)
     
     def __post_init__(self):
         """Validate configuration parameters."""

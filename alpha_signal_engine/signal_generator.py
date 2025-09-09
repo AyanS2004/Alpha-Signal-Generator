@@ -51,7 +51,7 @@ class SignalGenerator:
         
         # Strong upward momentum with volume confirmation
         price_momentum = df['Close'] / df['Close'].shift(lookback) - 1
-        volume_confirmation = df['volume_ratio'] > volume_threshold
+        volume_confirmation = df['volume_ratio'] >= volume_threshold
         
         # Buy signal: strong positive momentum with volume
         buy_condition = (price_momentum > threshold) & volume_confirmation
@@ -125,10 +125,15 @@ class SignalGenerator:
         df['combined_signal'] += 0.2 * df['mean_reversion_signal']
         df['combined_signal'] += 0.1 * df['rsi_signal']
         
-        # Final signal: threshold-based
+        # Add a basic trend confirmation: price above/below medium SMA
+        trend_up = df['Close'] > df['sma_20']
+        trend_down = df['Close'] < df['sma_20']
+
+        # Final signal: threshold-based with trend confirmation
+        thresh = getattr(self.config, 'final_signal_threshold', 0.5)
         df['final_signal'] = 0
-        df.loc[df['combined_signal'] > 0.5, 'final_signal'] = 1  # Buy
-        df.loc[df['combined_signal'] < -0.5, 'final_signal'] = -1  # Sell
+        df.loc[(df['combined_signal'] > thresh) & trend_up, 'final_signal'] = 1  # Buy
+        df.loc[(df['combined_signal'] < -thresh) & trend_down, 'final_signal'] = -1  # Sell
         
         return df
     

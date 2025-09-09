@@ -119,10 +119,17 @@ class AlphaSignalEngine:
                         self.signals, self.backtest_results, 
                         save_path="performance_analysis.png"
                     )
+                    # Also save signal, risk and trading activity plots when requested
                     self.visualizer.plot_signal_analysis(
                         self.signals, save_path="signal_analysis.png"
                     )
-                    print("   Plots saved as 'performance_analysis.png' and 'signal_analysis.png'")
+                    self.visualizer.plot_risk_metrics(
+                        self.performance_metrics, save_path="risk_analysis.png"
+                    )
+                    self.visualizer.plot_trading_activity(
+                        self.signals, self.backtest_results, save_path="trading_activity.png"
+                    )
+                    print("   Plots saved: 'performance_analysis.png', 'signal_analysis.png', 'risk_analysis.png', 'trading_activity.png'")
                     
             except Exception as e:
                 print(f"   Warning: Could not create plots: {str(e)}")
