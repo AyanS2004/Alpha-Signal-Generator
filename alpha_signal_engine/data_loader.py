@@ -135,6 +135,9 @@ class DataLoader:
         df['momentum_10'] = df['Close'] / df['Close'].shift(10) - 1
         df['momentum_20'] = df['Close'] / df['Close'].shift(20) - 1
         
+        # Average True Range (ATR) for volatility-aware risk
+        df['atr'] = self._calculate_atr(df, period=14)
+
         # Remove NaN values
         df = df.dropna()
         
@@ -148,6 +151,19 @@ class DataLoader:
         rs = gain / loss
         rsi = 100 - (100 / (1 + rs))
         return rsi
+
+    def _calculate_atr(self, df: pd.DataFrame, period: int = 14) -> pd.Series:
+        """Calculate Average True Range (ATR) using Wilder's smoothing."""
+        high = df['High']
+        low = df['Low']
+        close = df['Close']
+        prev_close = close.shift(1)
+        tr1 = high - low
+        tr2 = (high - prev_close).abs()
+        tr3 = (low - prev_close).abs()
+        tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
+        atr = tr.ewm(alpha=1/period, adjust=False).mean()
+        return atr
     
     def get_data_summary(self, df: pd.DataFrame) -> dict:
         """Get summary statistics of the loaded data."""

@@ -47,7 +47,7 @@ class Config:
     use_numba: bool = True
 
     # Signal combination
-    final_signal_threshold: float = 0.3  # lower threshold to increase entries (was 0.5 implicit)
+    final_signal_threshold: float = 0.25  # slightly lower to increase entries
     
     def __post_init__(self):
         """Validate configuration parameters."""

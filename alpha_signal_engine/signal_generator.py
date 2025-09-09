@@ -8,6 +8,7 @@ import numpy as np
 from typing import Tuple, Dict, List
 from numba import jit
 import warnings
+from .advanced_signals import AdvancedSignalGenerator
 
 
 class SignalGenerator:
@@ -16,6 +17,8 @@ class SignalGenerator:
     def __init__(self, config):
         """Initialize SignalGenerator with configuration."""
         self.config = config
+        # Initialize advanced ML/regime generator
+        self.advanced_generator = AdvancedSignalGenerator(config)
         
     def generate_signals(self, df: pd.DataFrame) -> pd.DataFrame:
         """
@@ -35,6 +38,20 @@ class SignalGenerator:
         # Generate mean reversion signals
         df = self._generate_mean_reversion_signals(df)
         
+        # ML signals + market regime
+        try:
+            ml_df = self.advanced_generator.generate_ml_signals(df)
+            regime_df = self.advanced_generator.generate_market_regime_signals(df)
+            df = df.join(ml_df, how='left')
+            df = df.join(regime_df[['market_regime']], how='left')
+            df['ml_signal'] = df['ml_signal'].fillna(0)
+            df['ml_confidence'] = df['ml_confidence'].fillna(0.0)
+            df['market_regime'] = df['market_regime'].fillna('ranging')
+        except Exception:
+            df['ml_signal'] = 0
+            df['ml_confidence'] = 0.0
+            df['market_regime'] = 'ranging'
+
         # Combine signals
         df = self._combine_signals(df)
         
@@ -114,16 +131,38 @@ class SignalGenerator:
     
     def _combine_signals(self, df: pd.DataFrame) -> pd.DataFrame:
         """Combine different signals into final trading signal."""
-        # Weighted combination of signals
+        # Regime-aware combination using market_regime
         df['combined_signal'] = 0.0
-        
-        # Momentum signals (positive weight)
-        df['combined_signal'] += 0.4 * df['momentum_signal']
-        df['combined_signal'] += 0.3 * df['ema_signal']
-        
-        # Mean reversion signals (negative weight for contrarian)
-        df['combined_signal'] += 0.2 * df['mean_reversion_signal']
-        df['combined_signal'] += 0.1 * df['rsi_signal']
+        trending_mask = (df['market_regime'] == 'trending')
+        ranging_mask = (df['market_regime'] == 'ranging')
+        volatile_mask = (df['market_regime'] == 'volatile')
+
+        # Trending: momentum + EMA + ML
+        df.loc[trending_mask, 'combined_signal'] = (
+            0.5 * df.loc[trending_mask, 'momentum_signal'] +
+            0.3 * df.loc[trending_mask, 'ema_signal'] +
+            0.2 * df.loc[trending_mask, 'ml_signal']
+        ).fillna(0)
+
+        # Ranging: mean-reversion + RSI
+        df.loc[ranging_mask, 'combined_signal'] = (
+            0.6 * df.loc[ranging_mask, 'mean_reversion_signal'] +
+            0.4 * df.loc[ranging_mask, 'rsi_signal']
+        ).fillna(0)
+
+        # Volatile: cautious, blend MR and ML
+        df.loc[volatile_mask, 'combined_signal'] = (
+            0.5 * df.loc[volatile_mask, 'mean_reversion_signal'] +
+            0.5 * df.loc[volatile_mask, 'ml_signal']
+        ).fillna(0)
+
+        # Normalize and final signal with confidence-adjusted threshold
+        df['combined_signal'] = np.clip(df['combined_signal'], -1.5, 1.5)
+        thresh = getattr(self.config, 'final_signal_threshold', 0.5)
+        df['final_signal'] = 0
+        confidence_factor = df['ml_confidence'].fillna(0.5).replace(0, 0.5)
+        df.loc[df['combined_signal'] > (thresh / confidence_factor), 'final_signal'] = 1
+        df.loc[df['combined_signal'] < (-thresh / confidence_factor), 'final_signal'] = -1
         
         # Add a basic trend confirmation: price above/below medium SMA
         trend_up = df['Close'] > df['sma_20']

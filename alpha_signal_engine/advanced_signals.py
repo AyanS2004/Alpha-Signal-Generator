@@ -243,6 +243,28 @@ class AdvancedSignalGenerator:
             features['volume_ratio'] = data['Volume'] / data['Volume'].rolling(window=20).mean()
             features['volume_trend'] = data['Volume'].pct_change()
         
+        # Time-based features
+        if isinstance(data.index, pd.DatetimeIndex):
+            features['dow'] = data.index.dayofweek
+            features['dom'] = data.index.day
+            features['month'] = data.index.month
+            if not (data.index.hour is None):
+                features['hour'] = getattr(data.index, 'hour', 0)
+
+        # Higher moment features
+        window = 20
+        ret = features['returns']
+        features['ret_skew'] = ret.rolling(window).skew()
+        features['ret_kurt'] = ret.rolling(window).kurt()
+
+        # Interaction features
+        if 'volume_ratio' in features.columns:
+            features['ret_x_volratio'] = features['returns'] * features['volume_ratio']
+        else:
+            if 'Volume' in data.columns:
+                vol_ratio = data['Volume'] / data['Volume'].rolling(window=20).mean()
+                features['ret_x_volratio'] = features['returns'] * vol_ratio
+
         # Lagged features
         for lag in [1, 2, 3, 5]:
             features[f'returns_lag_{lag}'] = features['returns'].shift(lag)
