@@ -223,9 +223,9 @@ class AlphaSignalApp:
                 self.running = True
                 self.open_browser()
                 
-                print("\n🎉 Alpha Signal Engine is running!")
-                print("📊 Frontend: http://localhost:3000")
-                print("🔧 Backend:  http://localhost:5000")
+                print("\nAlpha Signal Engine is running!")
+                print("Frontend: http://localhost:3000")
+                print("Backend:  http://localhost:5000")
                 print("\nPress Ctrl+C to stop the application")
                 
                 # Keep the main thread alive
@@ -249,7 +249,7 @@ def check_prerequisites():
     
     # Check Python version
     if sys.version_info < (3, 8):
-        print("❌ Python 3.8+ is required")
+        print("Python 3.8+ is required")
         return False
     
     # Check Node.js
@@ -261,11 +261,11 @@ def check_prerequisites():
             result = subprocess.run(["node", "--version"], capture_output=True, text=True)
         
         if result.returncode != 0:
-            print("❌ Node.js is not installed")
+            print("Node.js is not installed")
             return False
-        print(f"✅ Node.js: {result.stdout.strip()}")
+        print(f"Node.js: {result.stdout.strip()}")
     except FileNotFoundError:
-        print("❌ Node.js is not installed")
+        print("Node.js is not installed")
         return False
     
     # Check npm
@@ -277,24 +277,24 @@ def check_prerequisites():
             result = subprocess.run(["npm", "--version"], capture_output=True, text=True)
         
         if result.returncode != 0:
-            print("❌ npm is not installed")
+            print("npm is not installed")
             return False
-        print(f"✅ npm: {result.stdout.strip()}")
+        print(f"npm: {result.stdout.strip()}")
     except FileNotFoundError:
-        print("❌ npm is not installed")
+        print("npm is not installed")
         return False
     
-    print("✅ All prerequisites are satisfied")
+    print("All prerequisites are satisfied")
     return True
 
 def main():
     """Main entry point."""
-    print("🎯 Alpha Signal Engine - Startup Script")
+    print("Alpha Signal Engine - Startup Script")
     print("=" * 50)
     
     # Check prerequisites
     if not check_prerequisites():
-        print("\n❌ Please install the missing prerequisites and try again")
+        print("\nPlease install the missing prerequisites and try again")
         sys.exit(1)
     
     # Create and run the application

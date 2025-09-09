@@ -88,7 +88,7 @@ def health_check():
     return jsonify({
         'status': 'healthy',
         'timestamp': datetime.now().isoformat(),
-        'version': '1.0.0'
+        'version': '1.1.0'
     })
 
 @app.route('/api/dashboard', methods=['GET'])
@@ -110,7 +110,8 @@ def get_dashboard_data():
                 {'date': 'Apr', 'value': 108},
                 {'date': 'May', 'value': 115},
                 {'date': 'Jun', 'value': 120},
-            ]
+            ],
+            'demo': True
         }
         return jsonify(data)
     except Exception as e:
@@ -219,6 +220,8 @@ def run_custom_backtest():
                     momentum_lookback=custom_config.get('momentumLookback', 20),
                     momentum_threshold=custom_config.get('momentumThreshold', 0.02),
                     mean_reversion_lookback=custom_config.get('meanReversionLookback', 50),
+                    mean_reversion_threshold=custom_config.get('meanReversionThreshold', 0.01),
+                    mean_reversion_std_multiplier=custom_config.get('meanReversionStdMultiplier', 2.0),
                     transaction_cost_bps=custom_config.get('transactionCost', 1.0),
                     stop_loss_bps=custom_config.get('stopLoss', 50.0),
                     take_profit_bps=custom_config.get('takeProfit', 100.0)
@@ -310,9 +313,36 @@ def run_optimization():
         engine = AlphaSignalEngine()
         
         # Run optimization
+        csv_path = data.get('csvPath')
+        temp_csv = None
+        if not csv_path or not os.path.exists(csv_path):
+            # Synthesize a small dataset for optimization if none provided
+            try:
+                synth_len = 500
+                dates = pd.date_range(end=pd.Timestamp.today(), periods=synth_len, freq='D')
+                prices = 100 + np.cumsum(np.random.normal(0, 1, synth_len))
+                highs = prices * (1 + np.abs(np.random.normal(0, 0.005, synth_len)))
+                lows = prices * (1 - np.abs(np.random.normal(0, 0.005, synth_len)))
+                opens = prices * (1 + np.random.normal(0, 0.002, synth_len))
+                vols = np.random.randint(100000, 500000, synth_len)
+                df = pd.DataFrame({
+                    'Datetime': dates,
+                    'Open': opens,
+                    'High': highs,
+                    'Low': lows,
+                    'Close': prices,
+                    'Volume': vols,
+                })
+                with tempfile.NamedTemporaryFile(delete=False, suffix='.csv') as tmpf:
+                    df.to_csv(tmpf.name, index=False)
+                    temp_csv = tmpf.name
+                csv_path = temp_csv
+            except Exception:
+                pass
+
         results = engine.optimize_parameters(
             param_ranges=param_ranges,
-            csv_file_path=data.get('csvPath', 'test_data.csv')
+            csv_file_path=csv_path
         )
         
         # Format results for frontend
@@ -437,7 +467,7 @@ def search_stocks():
         # Filter stocks that match the query
         matching_stocks = [stock for stock in common_stocks if query in stock]
         
-        return jsonify({'stocks': matching_stocks[:10]})
+        return jsonify({'stocks': matching_stocks[:10], 'demo': True})
         
     except Exception as e:
         logger.exception("search_stocks:error")
@@ -464,7 +494,8 @@ def get_settings():
             'riskManagement': True,
             'apiKey': '',
             'apiSecret': '',
-            'dataProvider': 'alpha_vantage'
+            'dataProvider': 'alpha_vantage',
+            'demo': True
         }
         
         return jsonify(settings)
@@ -499,15 +530,38 @@ def download_results():
         
         # Create temporary file with results
         with tempfile.NamedTemporaryFile(delete=False, suffix='.csv') as tmp_file:
-            # Generate sample data
-            df = pd.DataFrame({
-                'Date': pd.date_range(start='2023-01-01', periods=100, freq='D'),
-                'Price': np.random.randn(100).cumsum() + 100,
-                'Signal': np.random.choice(['BUY', 'SELL', 'HOLD'], 100),
-                'PnL': np.random.randn(100)
-            })
+            # If we have real results from last backtest, export them; otherwise, sample
+            global engine
+            df = None
+            try:
+                if engine is not None:
+                    bt = engine.get_backtest_results()
+                    sig = engine.get_signals()
+                    if bt is not None:
+                        df = pd.DataFrame({
+                            'Equity': bt.get('equity', []),
+                            'PnL': bt.get('pnl', []),
+                            'Drawdown': bt.get('drawdown', []),
+                        })
+                        if isinstance(sig, pd.DataFrame) and 'Close' in sig.columns and 'final_signal' in sig.columns:
+                            # Align sizes safely
+                            min_len = min(len(df), len(sig))
+                            df = df.iloc[:min_len]
+                            df.insert(0, 'Close', sig['Close'].iloc[:min_len].values)
+                            df.insert(1, 'Signal', sig['final_signal'].iloc[:min_len].values)
+            except Exception:
+                df = None
+
+            if df is None or df.empty:
+                df = pd.DataFrame({
+                    'Date': pd.date_range(start='2023-01-01', periods=100, freq='D'),
+                    'Price': np.random.randn(100).cumsum() + 100,
+                    'Signal': np.random.choice(['BUY', 'SELL', 'HOLD'], 100),
+                    'PnL': np.random.randn(100)
+                })
+
             df.to_csv(tmp_file.name, index=False)
-            
+
             return send_file(
                 tmp_file.name,
                 as_attachment=True,

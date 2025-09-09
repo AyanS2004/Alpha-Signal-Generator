@@ -67,7 +67,7 @@ class PerformanceAnalyzer:
         returns = np.insert(returns, 0, 0)
         
         # Annualized metrics
-        periods_per_year = 252  # Assuming daily data
+        periods_per_year = self.config.trading_days_per_year  # Assuming daily data
         if len(df) > 1:
             actual_periods = len(df)
             annualized_return = total_return * (periods_per_year / actual_periods)
@@ -100,7 +100,7 @@ class PerformanceAnalyzer:
         returns = np.insert(returns, 0, 0)
         
         # Volatility
-        volatility = np.std(returns) * np.sqrt(252)
+        volatility = np.std(returns) * np.sqrt(self.config.trading_days_per_year)
         
         # Maximum drawdown
         max_drawdown = np.max(drawdown)
@@ -182,8 +182,12 @@ class PerformanceAnalyzer:
         
         # Sharpe ratio
         risk_free_rate = self.config.risk_free_rate
-        excess_returns = returns - risk_free_rate / 252
-        sharpe_ratio = np.mean(excess_returns) / np.std(returns) * np.sqrt(252) if np.std(returns) > 0 else 0
+        excess_returns = returns - (risk_free_rate / self.config.trading_days_per_year)
+        sharpe_ratio = (
+            np.mean(excess_returns) / np.std(returns) * np.sqrt(self.config.trading_days_per_year)
+            if np.std(returns) > 0
+            else 0
+        )
         
         # Sortino ratio (using downside deviation)
         downside_returns = returns[returns < 0]
@@ -192,7 +196,7 @@ class PerformanceAnalyzer:
         
         # Calmar ratio (annualized return / max drawdown)
         total_return = (equity[-1] - equity[0]) / equity[0]
-        periods_per_year = 252
+        periods_per_year = self.config.trading_days_per_year
         if len(df) > 1:
             annualized_return = total_return * (periods_per_year / len(df))
         else:
@@ -202,7 +206,7 @@ class PerformanceAnalyzer:
         calmar_ratio = annualized_return / max_drawdown if max_drawdown > 0 else 0
         
         # Information ratio (assuming benchmark is risk-free rate)
-        tracking_error = np.std(returns) * np.sqrt(252)
+        tracking_error = np.std(returns) * np.sqrt(self.config.trading_days_per_year)
         information_ratio = np.mean(excess_returns) / tracking_error if tracking_error > 0 else 0
         
         return {

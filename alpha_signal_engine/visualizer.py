@@ -387,11 +387,36 @@ class Visualizer:
             positive_signals = len(signals[signals['final_signal'] > 0])
             win_rate = positive_signals / total_signals if total_signals > 0 else 0
             
+            # Estimate average win/loss from recent price deltas around signal changes
+            try:
+                close_prices = signals['Close'].astype(float).values
+                sig_vals = signals['final_signal'].values
+                wins = []
+                losses = []
+                last_sig_idx = None
+                last_sig_val = 0
+                for idx, s in enumerate(sig_vals):
+                    if s != 0 and s != last_sig_val:
+                        # signal change; if we had an open, close it
+                        if last_sig_idx is not None and last_sig_val != 0:
+                            ret = (close_prices[idx] - close_prices[last_sig_idx]) * (1 if last_sig_val > 0 else -1)
+                            if ret >= 0:
+                                wins.append(ret)
+                            else:
+                                losses.append(ret)
+                        last_sig_idx = idx
+                        last_sig_val = s
+                avg_win = float(np.mean(wins)) if len(wins) > 0 else 0.0
+                avg_loss = float(np.mean(losses)) if len(losses) > 0 else 0.0
+            except Exception:
+                avg_win = 0.0
+                avg_loss = 0.0
+
             return {
                 'Avg Hold Time': avg_hold_time,
                 'Win Rate': win_rate,
-                'Avg Win': 1.0,  # Placeholder
-                'Avg Loss': -0.5  # Placeholder
+                'Avg Win': avg_win,
+                'Avg Loss': avg_loss
             }
         except Exception:
             return {}

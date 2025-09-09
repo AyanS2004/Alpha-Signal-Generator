@@ -28,7 +28,7 @@ docker compose up --build
 - Frontend: http://localhost:3000
 - Backend:  http://localhost:5000
 
-Without both Alpaca vars, Real-Time will remain disconnected (no fake ticks).
+If Alpaca credentials are not provided, backend automatically falls back to Yahoo polling (no keys required). Use provider 'yahoo' from the UI; Alpaca requires both API and Secret.
 
 ### B) Local dev
 ```bash
