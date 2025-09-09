@@ -68,10 +68,11 @@ class SignalGenerator:
         
         # Strong upward momentum with volume confirmation
         price_momentum = df['Close'] / df['Close'].shift(lookback) - 1
-        volume_confirmation = df['volume_ratio'] >= volume_threshold
+        # Relax volume confirmation to avoid starving signals
+        volume_confirmation = (df['volume_ratio'] >= volume_threshold) if 'volume_ratio' in df.columns else True
         
         # Buy signal: strong positive momentum with volume
-        buy_condition = (price_momentum > threshold) & volume_confirmation
+        buy_condition = (price_momentum > threshold) & volume_confirmation if isinstance(volume_confirmation, pd.Series) else (price_momentum > threshold)
         df.loc[buy_condition, 'momentum_signal'] = 1
         
         # Sell signal: strong negative momentum
@@ -156,23 +157,22 @@ class SignalGenerator:
             0.5 * df.loc[volatile_mask, 'ml_signal']
         ).fillna(0)
 
-        # Normalize and final signal with confidence-adjusted threshold
+        # Normalize
         df['combined_signal'] = np.clip(df['combined_signal'], -1.5, 1.5)
+
+        # Final signal: confidence-adjusted threshold
         thresh = getattr(self.config, 'final_signal_threshold', 0.5)
         df['final_signal'] = 0
-        confidence_factor = df['ml_confidence'].fillna(0.5).replace(0, 0.5)
+        confidence_factor = df['ml_confidence'].fillna(1.0).replace(0, 1.0)
         df.loc[df['combined_signal'] > (thresh / confidence_factor), 'final_signal'] = 1
         df.loc[df['combined_signal'] < (-thresh / confidence_factor), 'final_signal'] = -1
-        
-        # Add a basic trend confirmation: price above/below medium SMA
-        trend_up = df['Close'] > df['sma_20']
-        trend_down = df['Close'] < df['sma_20']
 
-        # Final signal: threshold-based with trend confirmation
-        thresh = getattr(self.config, 'final_signal_threshold', 0.5)
-        df['final_signal'] = 0
-        df.loc[(df['combined_signal'] > thresh) & trend_up, 'final_signal'] = 1  # Buy
-        df.loc[(df['combined_signal'] < -thresh) & trend_down, 'final_signal'] = -1  # Sell
+        # Fallback activity: if still no signals, force EMA crossover entries
+        if (df['final_signal'] != 0).sum() == 0:
+            ema_cross_buy = (df['ema_12'] > df['ema_26']) & (df['ema_12'].shift(1) <= df['ema_26'].shift(1))
+            ema_cross_sell = (df['ema_12'] < df['ema_26']) & (df['ema_12'].shift(1) >= df['ema_26'].shift(1))
+            df.loc[ema_cross_buy.fillna(False), 'final_signal'] = 1
+            df.loc[ema_cross_sell.fillna(False), 'final_signal'] = -1
         
         return df
     

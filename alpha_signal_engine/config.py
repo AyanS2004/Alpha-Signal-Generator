@@ -20,12 +20,12 @@ class Config:
     position_size: float = 0.1  # 10% of capital per trade
     
     # Momentum strategy parameters
-    momentum_lookback: int = 20
+    momentum_lookback: int = 10
     momentum_threshold: float = 0.02  # 2% price change
     momentum_volume_threshold: float = 1.2  # relaxed volume confirmation (was 1.5)
     
     # Mean reversion strategy parameters
-    mean_reversion_lookback: int = 50
+    mean_reversion_lookback: int = 20
     mean_reversion_std_multiplier: float = 2.0
     mean_reversion_threshold: float = 0.01  # 1% deviation
     

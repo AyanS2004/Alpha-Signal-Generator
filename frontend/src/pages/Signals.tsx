@@ -1,21 +1,69 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Box, Typography, Paper, Grid, Chip, ToggleButtonGroup, ToggleButton } from '@mui/material';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { motion } from 'framer-motion';
+import axios from 'axios';
 
 type SignalRow = { date: string; type: string; strength: number; price: number };
 
-const mockSignals: SignalRow[] = Array.from({ length: 24 }).map((_, i) => ({
-  date: `2023-01-${(i + 1).toString().padStart(2, '0')}`,
-  type: ['momentum', 'mean-reversion', 'ml'][i % 3],
-  strength: Math.round((Math.random() * 2 - 1) * 100) / 100,
-  price: 100 + i + Math.sin(i) * 3,
-}));
-
 const Signals: React.FC = () => {
   const [filter, setFilter] = useState<string | null>('all');
+  const [signalsData, setSignalsData] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
 
-  const filtered = mockSignals.filter((s) => (filter === 'all' ? true : s.type === filter));
+  useEffect(() => {
+    const fetchSignals = async () => {
+      try {
+        const response = await axios.get('/api/signals');
+        if (response.data && !response.data.error) {
+          setSignalsData(response.data);
+        }
+      } catch (error) {
+        console.error('Error fetching signals:', error);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchSignals();
+  }, []);
+
+  // Convert API data to SignalRow format
+  const apiSignals: SignalRow[] = signalsData?.recent_signals?.map((signal: any) => ({
+    date: signal.date,
+    type: signal.signal === 'BUY' ? 'momentum' : signal.signal === 'SELL' ? 'mean-reversion' : 'ml',
+    strength: signal.confidence,
+    price: signal.price,
+  })) || [];
+
+  const filtered = apiSignals.filter((s) => (filter === 'all' ? true : s.type === filter));
+
+  if (loading) {
+    return (
+      <Box>
+        <Typography variant="h4" gutterBottom className="gradient-text">Signal Generation</Typography>
+        <Typography>Loading signals data...</Typography>
+      </Box>
+    );
+  }
+
+  if (!signalsData || !signalsData.recent_signals || signalsData.recent_signals.length === 0) {
+    return (
+      <Box>
+        <Typography variant="h4" gutterBottom className="gradient-text">Signal Generation</Typography>
+        <Paper className="card p-5">
+          <Box sx={{ textAlign: 'center', py: 4 }}>
+            <Typography variant="h6" color="text.secondary" gutterBottom>
+              No Signal Data Available
+            </Typography>
+            <Typography variant="body2" color="text.secondary">
+              Run a backtest to generate trading signals and see real-time analysis.
+            </Typography>
+          </Box>
+        </Paper>
+      </Box>
+    );
+  }
 
   return (
     <Box>
@@ -68,7 +116,7 @@ const Signals: React.FC = () => {
                     </div>
                     <div className="flex items-center gap-2">
                       <Chip label={s.type} color={s.type === 'momentum' ? 'info' : s.type === 'ml' ? 'secondary' : 'default'} size="small" />
-                      <Chip label={`Strength: ${s.strength}`} color={s.strength > 0 ? 'success' : s.strength < 0 ? 'error' : 'warning'} size="small" />
+                      <Chip label={`Strength: ${s.strength.toFixed(2)}`} color={s.strength > 0.5 ? 'success' : s.strength < 0.3 ? 'error' : 'warning'} size="small" />
                     </div>
                   </Box>
                 ))}

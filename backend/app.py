@@ -42,6 +42,7 @@ ALPACA_SYMBOL = None
 
 # Settings file
 SETTINGS_FILE = os.path.join(os.path.dirname(__file__), 'settings.json')
+PORTFOLIO_FILE = os.path.join(os.path.dirname(__file__), 'portfolio.json')
 
 def _load_settings():
     try:
@@ -75,6 +76,21 @@ def _save_settings(settings: dict):
     with open(tmp, 'w', encoding='utf-8') as f:
         json.dump(settings, f, indent=2)
     os.replace(tmp, SETTINGS_FILE)
+
+def _load_portfolio() -> dict:
+    try:
+        if os.path.exists(PORTFOLIO_FILE):
+            with open(PORTFOLIO_FILE, 'r', encoding='utf-8') as f:
+                return json.load(f)
+    except Exception:
+        pass
+    return {'positions': []}
+
+def _save_portfolio(portfolio: dict):
+    tmp = PORTFOLIO_FILE + '.tmp'
+    with open(tmp, 'w', encoding='utf-8') as f:
+        json.dump(portfolio, f, indent=2)
+    os.replace(tmp, PORTFOLIO_FILE)
 
 def _compute_trades_list(results: dict, signals_df: pd.DataFrame) -> list:
     try:
@@ -164,25 +180,101 @@ def health_check():
 def get_dashboard_data():
     """Get dashboard data."""
     try:
-        # Simulate dashboard data
-        data = {
-            'totalReturn': 15.7,
-            'sharpeRatio': 1.23,
-            'maxDrawdown': -8.5,
-            'totalTrades': 156,
-            'winRate': 62.5,
-            'currentSignal': 'BUY',
-            'equityData': [
-                {'date': 'Jan', 'value': 100},
-                {'date': 'Feb', 'value': 105},
-                {'date': 'Mar', 'value': 110},
-                {'date': 'Apr', 'value': 108},
-                {'date': 'May', 'value': 115},
-                {'date': 'Jun', 'value': 120},
-            ],
-            'demo': True
+        global engine
+        if engine is None or engine.get_backtest_results() is None:
+            return jsonify({'error': 'No backtest results yet'}), 400
+
+        bt = engine.get_backtest_results()
+        perf = engine.get_performance_metrics() or {}
+        sig = engine.get_signals()
+
+        # KPIs
+        total_return = float(((bt['equity'][-1] - bt['equity'][0]) / bt['equity'][0]) * 100)
+        sharpe = float(perf.get('sharpe_ratio', 0))
+        max_dd = float(np.max(bt.get('drawdown', np.array([0]))) * -100.0) * -1  # keep negative percentage
+        trades = int(np.sum(np.array(bt.get('trades', [])) == -1))
+        win_rate = float(perf.get('win_rate', 0) * 100)
+
+        # Current signal
+        current_signal = 'HOLD'
+        try:
+            last_sig = int(sig['final_signal'].iloc[-1])
+            current_signal = 'BUY' if last_sig > 0 else 'SELL' if last_sig < 0 else 'HOLD'
+        except Exception:
+            pass
+
+        # Equity curve
+        equityData = [{'date': str(i), 'value': float(v)} for i, v in enumerate(bt.get('equity', []))]
+
+        # Benchmark data (SPY) aligned with backtest period
+        benchmarkData = []
+        try:
+            import yfinance as yf
+            spy = yf.Ticker("SPY")
+            
+            # Get date range from signals
+            if sig is not None and not sig.empty:
+                start_date = sig.index[0].strftime('%Y-%m-%d')
+                end_date = sig.index[-1].strftime('%Y-%m-%d')
+                
+                # Fetch SPY data for the same period
+                hist = spy.history(start=start_date, end=end_date)
+                if not hist.empty:
+                    # Align with equity curve dates
+                    initial_price = hist['Close'].iloc[0]
+                    initial_equity = bt['equity'][0] if bt['equity'] else 10000
+                    
+                    for i, (date, row) in enumerate(hist.iterrows()):
+                        if i < len(equityData):
+                            benchmark_return = (row['Close'] / initial_price - 1) * 100
+                            benchmarkData.append({
+                                'date': str(i),
+                                'value': benchmark_return
+                            })
+                else:
+                    # Fallback if no SPY data
+                    for i in range(len(equityData)):
+                        benchmarkData.append({
+                            'date': str(i),
+                            'value': i * 0.1  # Simple linear benchmark
+                        })
+            else:
+                # Fallback to simple benchmark
+                for i in range(len(equityData)):
+                    benchmarkData.append({
+                        'date': str(i),
+                        'value': i * 0.1  # Simple linear benchmark
+                    })
+        except Exception as e:
+            # Fallback to simple benchmark
+            for i in range(len(equityData)):
+                benchmarkData.append({
+                    'date': str(i),
+                    'value': i * 0.1  # Simple linear benchmark
+                })
+
+        # Risk metrics
+        risk = {
+            'var': float(perf.get('var_95', 0) * 100),
+            'beta': 0.0,
+            'alpha': float(perf.get('annualized_return', 0) * 100),
+            'volatility': float(perf.get('volatility', 0) * 100),
         }
-        return jsonify(data)
+
+        return jsonify({
+            'totalReturn': total_return,
+            'sharpeRatio': sharpe,
+            'maxDrawdown': float(perf.get('max_drawdown', 0) * 100),
+            'totalTrades': trades,
+            'winRate': win_rate,
+            'currentSignal': current_signal,
+            'equityData': equityData,
+            'benchmarkData': benchmarkData,
+            'portfolioValue': float(bt['equity'][-1]),
+            'dailyPnL': float(bt['pnl'][-1]) if len(bt.get('pnl', [])) else 0.0,
+            'openPositions': int(bt.get('positions', np.array([0]))[-1] != 0),
+            'riskMetrics': risk,
+        })
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
@@ -644,6 +736,135 @@ def download_results():
             
     except Exception as e:
         logger.exception("download_results:error")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/portfolio', methods=['GET'])
+def get_portfolio():
+    try:
+        pf = _load_portfolio()
+        # Compute market values using latest Close from engine if possible
+        prices = {}
+        try:
+            if engine is not None and isinstance(engine.get_signals(), pd.DataFrame):
+                last_close = float(engine.get_signals()['Close'].iloc[-1])
+                # Single-symbol engines won't map; leave empty
+        except Exception:
+            pass
+        return jsonify(pf)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/portfolio/add', methods=['POST'])
+def add_position():
+    try:
+        data = request.json or {}
+        symbol = (data.get('symbol') or '').upper()
+        shares = float(data.get('shares') or 0)
+        if not symbol or shares <= 0:
+            return jsonify({'error': 'symbol and positive shares required'}), 400
+
+        price = None
+        try:
+            t = yf.Ticker(symbol)
+            hist = t.history(period='1d')
+            if not hist.empty:
+                price = float(hist['Close'].iloc[-1])
+        except Exception:
+            pass
+        if price is None:
+            price = 0.0
+
+        pf = _load_portfolio()
+        # If exists, increase shares with new avg price (simple)
+        for p in pf['positions']:
+            if p['symbol'] == symbol:
+                total_shares = p['shares'] + shares
+                p['avgPrice'] = (p['avgPrice'] * p['shares'] + price * shares) / total_shares if total_shares > 0 else price
+                p['shares'] = total_shares
+                break
+        else:
+            pf['positions'].append({'symbol': symbol, 'shares': shares, 'avgPrice': price})
+        _save_portfolio(pf)
+        return jsonify({'status': 'ok', 'portfolio': pf})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/portfolio/remove', methods=['POST'])
+def remove_position():
+    try:
+        data = request.json or {}
+        symbol = (data.get('symbol') or '').upper()
+        if not symbol:
+            return jsonify({'error': 'symbol required'}), 400
+        pf = _load_portfolio()
+        pf['positions'] = [p for p in pf['positions'] if p['symbol'] != symbol]
+        _save_portfolio(pf)
+        return jsonify({'status': 'ok', 'portfolio': pf})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/signals', methods=['GET'])
+def get_signals():
+    try:
+        global engine
+        if engine is None or engine.get_signals() is None:
+            # Return empty signals data instead of error
+            return jsonify({
+                'current_signal': None,
+                'recent_signals': [],
+                'total_signals': 0
+            })
+
+        signals = engine.get_signals()
+        if signals.empty:
+            # Return empty signals data instead of error
+            return jsonify({
+                'current_signal': None,
+                'recent_signals': [],
+                'total_signals': 0
+            })
+
+        # Get recent signals (last 50)
+        recent_signals = signals.tail(50)
+        
+        signals_data = []
+        for idx, row in recent_signals.iterrows():
+            signal_type = 'BUY' if row['final_signal'] > 0 else 'SELL' if row['final_signal'] < 0 else 'HOLD'
+            confidence = row.get('ml_confidence', 0.5) if 'ml_confidence' in row else 0.5
+            
+            signals_data.append({
+                'date': idx.strftime('%Y-%m-%d %H:%M:%S') if hasattr(idx, 'strftime') else str(idx),
+                'signal': signal_type,
+                'confidence': float(confidence),
+                'price': float(row['Close']),
+                'momentum_signal': float(row.get('momentum_signal', 0)),
+                'mean_reversion_signal': float(row.get('mean_reversion_signal', 0)),
+                'ml_signal': float(row.get('ml_signal', 0)),
+                'market_regime': row.get('market_regime', 'unknown'),
+                'rsi': float(row.get('rsi', 50)),
+                'volume_ratio': float(row.get('volume_ratio', 1.0))
+            })
+
+        # Current signal analysis
+        latest = recent_signals.iloc[-1]
+        current_signal = {
+            'signal': 'BUY' if latest['final_signal'] > 0 else 'SELL' if latest['final_signal'] < 0 else 'HOLD',
+            'confidence': float(latest.get('ml_confidence', 0.5)),
+            'price': float(latest['Close']),
+            'momentum_score': float(latest.get('momentum_signal', 0)),
+            'mean_reversion_score': float(latest.get('mean_reversion_signal', 0)),
+            'ml_score': float(latest.get('ml_signal', 0)),
+            'market_regime': latest.get('market_regime', 'unknown'),
+            'rsi': float(latest.get('rsi', 50)),
+            'volume_ratio': float(latest.get('volume_ratio', 1.0))
+        }
+
+        return jsonify({
+            'current_signal': current_signal,
+            'recent_signals': signals_data,
+            'total_signals': len(signals_data)
+        })
+    except Exception as e:
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/risk/metrics', methods=['GET'])

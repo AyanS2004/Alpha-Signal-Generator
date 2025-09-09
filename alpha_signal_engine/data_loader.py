@@ -138,8 +138,10 @@ class DataLoader:
         # Average True Range (ATR) for volatility-aware risk
         df['atr'] = self._calculate_atr(df, period=14)
 
-        # Remove NaN values
-        df = df.dropna()
+        # Remove NaN values conservatively: only drop rows where essential indicators are missing
+        essential_cols = ['Open', 'High', 'Low', 'Close', 'Volume', 'sma_20', 'sma_50', 'ema_12', 'ema_26', 'bb_upper', 'bb_lower', 'rsi']
+        keep_cols = [c for c in essential_cols if c in df.columns]
+        df = df.dropna(subset=keep_cols)
         
         return df
     

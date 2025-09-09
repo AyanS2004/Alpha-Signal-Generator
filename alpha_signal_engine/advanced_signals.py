@@ -283,27 +283,45 @@ class AdvancedSignalGenerator:
         return target
     
     def _detect_volatility_regime(self, volatility: pd.Series) -> pd.Series:
-        """Detect volatility regime (low, medium, high)."""
-        vol_quantiles = volatility.rolling(window=60).quantile([0.33, 0.67])
-        
+        """Detect volatility regime (low, medium, high) with adaptive window."""
+        # Use a shorter, adaptive window to avoid data starvation
+        base_window = max(
+            20,
+            int(max(getattr(self.config, 'momentum_lookback', 10), getattr(self.config, 'mean_reversion_lookback', 20)) * 1.5)
+        )
+        window = min(base_window, 40)
+        vol_quantiles = volatility.rolling(window=window, min_periods=max(5, window//2)).quantile([0.33, 0.67])
+
         regime = pd.Series('medium', index=volatility.index)
-        regime[volatility < vol_quantiles.iloc[:, 0]] = 'low'
-        regime[volatility > vol_quantiles.iloc[:, 1]] = 'high'
-        
+        try:
+            lower = vol_quantiles.iloc[:, 0]
+            upper = vol_quantiles.iloc[:, 1]
+            regime[volatility < lower] = 'low'
+            regime[volatility > upper] = 'high'
+        except Exception:
+            pass
         return regime
     
     def _classify_market_regime(self, trend_strength: pd.Series, volatility: pd.Series) -> pd.Series:
-        """Classify market regime."""
+        """Classify market regime with adaptive window."""
         regime = pd.Series('ranging', index=trend_strength.index)
-        
-        # Trending regime
-        strong_trend = abs(trend_strength) > trend_strength.rolling(window=60).std()
+
+        base_window = max(
+            20,
+            int(max(getattr(self.config, 'momentum_lookback', 10), getattr(self.config, 'mean_reversion_lookback', 20)) * 1.5)
+        )
+        window = min(base_window, 40)
+
+        # Trending regime: strong trend relative to its recent variability
+        trend_std = trend_strength.rolling(window=window, min_periods=max(5, window//2)).std()
+        strong_trend = trend_std.notna() & (trend_strength.abs() > trend_std)
         regime[strong_trend] = 'trending'
-        
-        # Volatile regime
-        high_vol = volatility > volatility.rolling(window=60).quantile(0.8)
+
+        # Volatile regime: volatility above high quantile
+        vol_q = volatility.rolling(window=window, min_periods=max(5, window//2)).quantile(0.8)
+        high_vol = vol_q.notna() & (volatility > vol_q)
         regime[high_vol] = 'volatile'
-        
+
         return regime
     
     def _generate_mean_reversion_signals(self, data: pd.DataFrame, lookback: int = 10) -> pd.Series:

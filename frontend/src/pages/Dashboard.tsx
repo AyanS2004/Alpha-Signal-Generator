@@ -15,8 +15,6 @@ import {
   Select,
   MenuItem,
   IconButton,
-  Avatar,
-  Divider,
   Alert,
   Tabs,
   Tab,
@@ -26,8 +24,6 @@ import {
   TableContainer,
   TableHead,
   TableRow,
-  Badge,
-  Tooltip,
   Switch,
   FormControlLabel,
 } from '@mui/material';
@@ -39,21 +35,14 @@ import {
   Assessment,
   Warning,
   AccountBalance,
-  Timeline,
   Analytics,
-  Notifications,
   Refresh,
   PlayArrow,
-  Pause,
-  Settings,
-  Visibility,
-  VisibilityOff,
   Star,
   StarBorder,
   MoreVert,
   ArrowUpward,
   ArrowDownward,
-  AttachMoney,
   TrendingFlat,
   ShowChart as ChartIcon,
   Assessment as AnalyticsIcon,
@@ -72,6 +61,7 @@ interface DashboardData {
   winRate: number;
   currentSignal: string;
   equityData: Array<{ date: string; value: number }>;
+  benchmarkData: Array<{ date: string; value: number }>;
   portfolioValue: number;
   dailyPnL: number;
   openPositions: number;
@@ -113,7 +103,6 @@ const Dashboard: React.FC = () => {
   const [selectedStock, setSelectedStock] = useState('AAPL');
   const [timeframe, setTimeframe] = useState('1M');
   const [autoRefresh, setAutoRefresh] = useState(true);
-  const [showAdvancedMetrics, setShowAdvancedMetrics] = useState(true);
   const [activeTab, setActiveTab] = useState(0);
   
   const [dashboardData, setDashboardData] = useState<DashboardData>({
@@ -124,6 +113,7 @@ const Dashboard: React.FC = () => {
     winRate: 0,
     currentSignal: 'HOLD',
     equityData: [],
+    benchmarkData: [],
     portfolioValue: 0,
     dailyPnL: 0,
     openPositions: 0,
@@ -143,72 +133,144 @@ const Dashboard: React.FC = () => {
     { symbol: 'NVDA', name: 'NVIDIA Corporation', price: 485.09, change: 12.34, changePercent: 2.61, volume: 67890100, marketCap: 1198000000000, pe: 38.7, sector: 'Technology', isFavorite: false },
   ]);
 
-  const [portfolio, setPortfolio] = useState<PortfolioPosition[]>([
-    { symbol: 'AAPL', name: 'Apple Inc.', shares: 100, avgPrice: 165.20, currentPrice: 175.43, marketValue: 17543, unrealizedPnL: 1023, unrealizedPnLPercent: 6.19, weight: 35.2 },
-    { symbol: 'MSFT', name: 'Microsoft Corporation', shares: 50, avgPrice: 320.15, currentPrice: 338.11, marketValue: 16905.5, unrealizedPnL: 898, unrealizedPnLPercent: 5.61, weight: 33.9 },
-    { symbol: 'TSLA', name: 'Tesla Inc.', shares: 75, avgPrice: 235.80, currentPrice: 248.42, marketValue: 18631.5, unrealizedPnL: 946.5, unrealizedPnLPercent: 4.01, weight: 30.9 },
-  ]);
+  const [portfolio, setPortfolio] = useState<PortfolioPosition[]>([]);
+  const [newSymbol, setNewSymbol] = useState('AAPL');
+  const [newShares, setNewShares] = useState<number>(10);
+  const [signalsData, setSignalsData] = useState<any>({
+    current_signal: null,
+    recent_signals: [],
+    total_signals: 0
+  });
 
-  // Sample data for charts
-  const performanceData = [
-    { date: 'Jan', portfolio: 100000, benchmark: 100000, alpha: 0 },
-    { date: 'Feb', portfolio: 105000, benchmark: 102000, alpha: 3000 },
-    { date: 'Mar', portfolio: 110000, benchmark: 104000, alpha: 6000 },
-    { date: 'Apr', portfolio: 108000, benchmark: 106000, alpha: 2000 },
-    { date: 'May', portfolio: 115000, benchmark: 108000, alpha: 7000 },
-    { date: 'Jun', portfolio: 120000, benchmark: 110000, alpha: 10000 },
-  ];
+  // Dynamic performance data from dashboard API
+  const performanceData = React.useMemo(() => {
+    if (!dashboardData.equityData || !dashboardData.benchmarkData) {
+      return [];
+    }
+    
+    const portfolio = dashboardData.equityData;
+    const benchmark = dashboardData.benchmarkData;
+    const maxLength = Math.max(portfolio.length, benchmark.length);
+    
+    return Array.from({ length: maxLength }, (_, i) => ({
+      date: portfolio[i]?.date || benchmark[i]?.date || `Day ${i}`,
+      portfolio: portfolio[i]?.value || 0,
+      benchmark: benchmark[i]?.value || 0,
+      alpha: (portfolio[i]?.value || 0) - (benchmark[i]?.value || 0)
+    }));
+  }, [dashboardData.equityData, dashboardData.benchmarkData]);
 
-  const sectorAllocation = [
-    { name: 'Technology', value: 65, color: '#2196f3' },
-    { name: 'Automotive', value: 25, color: '#ff9800' },
-    { name: 'Healthcare', value: 10, color: '#4caf50' },
-  ];
 
   const COLORS = ['#0088FE', '#00C49F', '#FFBB28', '#FF8042', '#8884D8'];
 
   useEffect(() => {
     const fetchData = async () => {
       try {
-        // Simulate API call with realistic data
-        await new Promise(resolve => setTimeout(resolve, 1000));
+        const { data } = await axios.get('/api/dashboard');
+        if (data && !data.error) {
+          setDashboardData({
+            totalReturn: data.totalReturn ?? 0,
+            sharpeRatio: data.sharpeRatio ?? 0,
+            maxDrawdown: data.maxDrawdown ?? 0,
+            totalTrades: data.totalTrades ?? 0,
+            winRate: data.winRate ?? 0,
+            currentSignal: data.currentSignal ?? 'HOLD',
+            equityData: data.equityData ?? [],
+            benchmarkData: data.benchmarkData ?? [],
+            portfolioValue: data.portfolioValue ?? 0,
+            dailyPnL: data.dailyPnL ?? 0,
+            openPositions: data.openPositions ?? 0,
+            riskMetrics: data.riskMetrics ?? { var: 0, beta: 0, alpha: 0, volatility: 0 },
+          });
+        }
+        // Load portfolio
+        try {
+          const pf = await axios.get('/api/portfolio');
+          const positions = (pf.data.positions || []) as Array<{symbol: string; shares: number; avgPrice: number}>;
+          // Enrich with simple pricing via dashboard equityData latest; fallback to avgPrice
+          const mapped: PortfolioPosition[] = positions.map(p => {
+            const currentPrice = p.avgPrice; // backend can be extended to pass live
+            const marketValue = currentPrice * p.shares;
+            const unrealizedPnL = (currentPrice - p.avgPrice) * p.shares;
+            const unrealizedPnLPercent = p.avgPrice ? ((currentPrice - p.avgPrice) / p.avgPrice) * 100 : 0;
+            return {
+              symbol: p.symbol,
+              name: p.symbol,
+              shares: p.shares,
+              avgPrice: p.avgPrice,
+              currentPrice,
+              marketValue,
+              unrealizedPnL,
+              unrealizedPnLPercent,
+              weight: 0,
+            };
+          });
+          const totalMV = mapped.reduce((s, m) => s + m.marketValue, 0) || 1;
+          mapped.forEach(m => m.weight = (m.marketValue / totalMV) * 100);
+          setPortfolio(mapped);
+        } catch {}
         
-        setDashboardData({
-          totalReturn: 15.7,
-          sharpeRatio: 1.23,
-          maxDrawdown: -8.5,
-          totalTrades: 156,
-          winRate: 62.5,
-          currentSignal: 'BUY',
-          portfolioValue: 49800,
-          dailyPnL: 1247.5,
-          openPositions: 3,
-          equityData: performanceData.map(d => ({ date: d.date, value: d.portfolio })),
-          riskMetrics: {
-            var: 2.3,
-            beta: 0.95,
-            alpha: 3.2,
-            volatility: 12.5,
-          },
-        });
+        // Load signals data
+        try {
+          const signals = await axios.get('/api/signals');
+          if (signals.data && !signals.data.error) {
+            setSignalsData(signals.data);
+          } else {
+            // Set default empty signals data
+            setSignalsData({
+              current_signal: null,
+              recent_signals: [],
+              total_signals: 0
+            });
+          }
+        } catch {
+          // Set default empty signals data on error
+          setSignalsData({
+            current_signal: null,
+            recent_signals: [],
+            total_signals: 0
+          });
+        }
       } catch (e) {
-        console.error('Error fetching dashboard data:', e);
+        // Fallback to zeros if no backtest yet
+        setDashboardData((prev) => ({ ...prev, equityData: [] }));
       } finally {
         setLoading(false);
       }
     };
 
     fetchData();
-    
-    // Auto-refresh every 30 seconds
-    const interval = setInterval(() => {
-      if (autoRefresh) {
-        fetchData();
-      }
-    }, 30000);
 
+    const interval = setInterval(() => {
+      if (autoRefresh) fetchData();
+    }, 30000);
     return () => clearInterval(interval);
-  }, [autoRefresh]);
+  }, [autoRefresh, dashboardData.equityData]);
+
+  const addToPortfolio = async () => {
+    try {
+      await axios.post('/api/portfolio/add', { symbol: newSymbol, shares: newShares });
+      const pf = await axios.get('/api/portfolio');
+      const positions = (pf.data.positions || []) as Array<{symbol: string; shares: number; avgPrice: number}>;
+      const mapped: PortfolioPosition[] = positions.map(p => {
+        const currentPrice = p.avgPrice;
+        const marketValue = currentPrice * p.shares;
+        const unrealizedPnL = (currentPrice - p.avgPrice) * p.shares;
+        const unrealizedPnLPercent = p.avgPrice ? ((currentPrice - p.avgPrice) / p.avgPrice) * 100 : 0;
+        return { symbol: p.symbol, name: p.symbol, shares: p.shares, avgPrice: p.avgPrice, currentPrice, marketValue, unrealizedPnL, unrealizedPnLPercent, weight: 0 };
+      });
+      const totalMV = mapped.reduce((s, m) => s + m.marketValue, 0) || 1;
+      mapped.forEach(m => m.weight = (m.marketValue / totalMV) * 100);
+      setPortfolio(mapped);
+    } catch {}
+  };
+
+  const removeFromPortfolio = async (symbol: string) => {
+    try {
+      await axios.post('/api/portfolio/remove', { symbol });
+      setPortfolio(prev => prev.filter(p => p.symbol !== symbol));
+    } catch {}
+  };
 
   const getSignalColor = (signal: string) => {
     switch (signal) {
@@ -407,7 +469,8 @@ const Dashboard: React.FC = () => {
         <Tabs value={activeTab} onChange={(e, newValue) => setActiveTab(newValue)}>
           <Tab icon={<PortfolioIcon />} label="Portfolio" />
           <Tab icon={<ChartIcon />} label="Analytics" />
-          <Tab icon={<TimelineIcon />} label="Watchlist" />
+          <Tab icon={<TimelineIcon />} label="Signals" />
+          <Tab icon={<Assessment />} label="Watchlist" />
           <Tab icon={<AnalyticsIcon />} label="Risk Metrics" />
         </Tabs>
       </Paper>
@@ -443,7 +506,7 @@ const Dashboard: React.FC = () => {
                 </Card>
               </Grid>
 
-              {/* Sector Allocation */}
+              {/* Sector Allocation (dynamic by portfolio weights) */}
               <Grid item xs={12} lg={4}>
                 <Card>
                   <CardContent>
@@ -453,7 +516,7 @@ const Dashboard: React.FC = () => {
                     <ResponsiveContainer width="100%" height={300}>
                       <PieChart>
                         <Pie
-                          data={sectorAllocation}
+                          data={portfolio.map(p => ({ name: p.symbol, value: p.weight }))}
                           cx="50%"
                           cy="50%"
                           labelLine={false}
@@ -462,13 +525,27 @@ const Dashboard: React.FC = () => {
                           fill="#8884d8"
                           dataKey="value"
                         >
-                          {sectorAllocation.map((entry, index) => (
-                            <Cell key={`cell-${index}`} fill={entry.color} />
+                          {portfolio.map((entry, index) => (
+                            <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
                           ))}
                         </Pie>
                         <RechartsTooltip />
                       </PieChart>
                     </ResponsiveContainer>
+                  </CardContent>
+                </Card>
+              </Grid>
+
+              {/* Add Position */}
+              <Grid item xs={12}>
+                <Card>
+                  <CardContent>
+                    <Typography variant="h6" gutterBottom>Add Position</Typography>
+                    <Box sx={{ display: 'flex', gap: 2, alignItems: 'center' }}>
+                      <TextField size="small" label="Symbol" value={newSymbol} onChange={(e) => setNewSymbol(e.target.value.toUpperCase())} sx={{ width: 120 }} />
+                      <TextField size="small" label="Shares" type="number" value={newShares} onChange={(e) => setNewShares(Number(e.target.value))} sx={{ width: 120 }} />
+                      <Button variant="contained" onClick={addToPortfolio}>Add</Button>
+                    </Box>
                   </CardContent>
                 </Card>
               </Grid>
@@ -521,6 +598,9 @@ const Dashboard: React.FC = () => {
                                 </Box>
                               </TableCell>
                               <TableCell align="right">{position.weight.toFixed(1)}%</TableCell>
+                              <TableCell align="center">
+                                <Button size="small" color="error" onClick={() => removeFromPortfolio(position.symbol)}>Remove</Button>
+                              </TableCell>
                             </TableRow>
                           ))}
                         </TableBody>
@@ -607,25 +687,33 @@ const Dashboard: React.FC = () => {
                     <Alert severity="info" sx={{ mb: 2 }}>
                       <Typography variant="body2">
                         Based on momentum and mean reversion analysis, {selectedStock} shows a {dashboardData.currentSignal.toLowerCase()} signal.
-                        Confidence level: 78%
+                        {signalsData?.current_signal ? ` Confidence level: ${(signalsData.current_signal.confidence * 100).toFixed(1)}%` : ' Confidence level: N/A'}
                       </Typography>
                     </Alert>
                     <Grid container spacing={2}>
                       <Grid item xs={6} md={3}>
                         <Typography variant="body2" color="text.secondary">Momentum Score</Typography>
-                        <Typography variant="h6" color="primary">0.72</Typography>
+                        <Typography variant="h6" color="primary">
+                          {signalsData?.current_signal?.momentum_score?.toFixed(3) || 'N/A'}
+                        </Typography>
                       </Grid>
                       <Grid item xs={6} md={3}>
                         <Typography variant="body2" color="text.secondary">Volatility</Typography>
-                        <Typography variant="h6" color="secondary">18.5%</Typography>
+                        <Typography variant="h6" color="secondary">
+                          {dashboardData.riskMetrics?.volatility?.toFixed(1) || 'N/A'}%
+                        </Typography>
                       </Grid>
                       <Grid item xs={6} md={3}>
                         <Typography variant="body2" color="text.secondary">RSI</Typography>
-                        <Typography variant="h6" color="info.main">65.2</Typography>
+                        <Typography variant="h6" color="info.main">
+                          {signalsData?.current_signal?.rsi?.toFixed(1) || 'N/A'}
+                        </Typography>
                       </Grid>
                       <Grid item xs={6} md={3}>
-                        <Typography variant="body2" color="text.secondary">Volume</Typography>
-                        <Typography variant="h6" color="success.main">+12.3%</Typography>
+                        <Typography variant="body2" color="text.secondary">Volume Ratio</Typography>
+                        <Typography variant="h6" color="success.main">
+                          {signalsData?.current_signal?.volume_ratio ? `${(signalsData.current_signal.volume_ratio * 100 - 100).toFixed(1)}%` : 'N/A'}
+                        </Typography>
                       </Grid>
                     </Grid>
                   </CardContent>
@@ -677,6 +765,181 @@ const Dashboard: React.FC = () => {
         )}
 
         {activeTab === 2 && (
+          <motion.div
+            key="signals"
+            initial={{ opacity: 0, x: 20 }}
+            animate={{ opacity: 1, x: 0 }}
+            exit={{ opacity: 0, x: -20 }}
+            transition={{ duration: 0.3 }}
+          >
+            <Grid container spacing={3}>
+              {/* Current Signal Analysis */}
+              <Grid item xs={12} md={6}>
+                <Card>
+                  <CardContent>
+                    <Typography variant="h6" gutterBottom>
+                      Current Signal Analysis
+                    </Typography>
+                    {signalsData?.current_signal && signalsData.total_signals > 0 && signalsData.current_signal.price > 0 ? (
+                      <>
+                        <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 2 }}>
+                          <Typography variant="h4">
+                            {signalsData.current_signal.signal}
+                          </Typography>
+                          <Chip
+                            label={`${(signalsData.current_signal.confidence * 100).toFixed(1)}% Confidence`}
+                            color={signalsData.current_signal.confidence > 0.7 ? 'success' : signalsData.current_signal.confidence > 0.5 ? 'warning' : 'error'}
+                            variant="filled"
+                          />
+                        </Box>
+                        <Grid container spacing={2}>
+                          <Grid item xs={6}>
+                            <Typography variant="body2" color="text.secondary">Price</Typography>
+                            <Typography variant="h6">${signalsData.current_signal.price.toFixed(2)}</Typography>
+                          </Grid>
+                          <Grid item xs={6}>
+                            <Typography variant="body2" color="text.secondary">Market Regime</Typography>
+                            <Typography variant="h6" sx={{ textTransform: 'capitalize' }}>
+                              {signalsData.current_signal.market_regime}
+                            </Typography>
+                          </Grid>
+                          <Grid item xs={6}>
+                            <Typography variant="body2" color="text.secondary">RSI</Typography>
+                            <Typography variant="h6">{signalsData.current_signal.rsi.toFixed(1)}</Typography>
+                          </Grid>
+                          <Grid item xs={6}>
+                            <Typography variant="body2" color="text.secondary">Volume Ratio</Typography>
+                            <Typography variant="h6">{signalsData.current_signal.volume_ratio.toFixed(2)}x</Typography>
+                          </Grid>
+                        </Grid>
+                      </>
+                    ) : (
+                      <Box sx={{ textAlign: 'center', py: 4 }}>
+                        <Typography variant="h6" color="text.secondary" gutterBottom>
+                          No Signal Data Available
+                        </Typography>
+                        <Typography variant="body2" color="text.secondary">
+                          Run a backtest to generate trading signals and see real-time analysis.
+                        </Typography>
+                      </Box>
+                    )}
+                  </CardContent>
+                </Card>
+              </Grid>
+
+              {/* Signal Components */}
+              <Grid item xs={12} md={6}>
+                <Card>
+                  <CardContent>
+                    <Typography variant="h6" gutterBottom>
+                      Signal Components
+                    </Typography>
+                    {signalsData?.current_signal && signalsData.total_signals > 0 && signalsData.current_signal.price > 0 ? (
+                      <Grid container spacing={2}>
+                        <Grid item xs={12}>
+                          <Typography variant="body2" color="text.secondary">Momentum Score</Typography>
+                          <LinearProgress 
+                            variant="determinate" 
+                            value={Math.abs(signalsData.current_signal.momentum_score) * 50 + 50} 
+                            sx={{ mb: 1 }}
+                          />
+                          <Typography variant="body2">
+                            {signalsData.current_signal.momentum_score.toFixed(3)}
+                          </Typography>
+                        </Grid>
+                        <Grid item xs={12}>
+                          <Typography variant="body2" color="text.secondary">Mean Reversion Score</Typography>
+                          <LinearProgress 
+                            variant="determinate" 
+                            value={Math.abs(signalsData.current_signal.mean_reversion_score) * 50 + 50} 
+                            sx={{ mb: 1 }}
+                          />
+                          <Typography variant="body2">
+                            {signalsData.current_signal.mean_reversion_score.toFixed(3)}
+                          </Typography>
+                        </Grid>
+                        <Grid item xs={12}>
+                          <Typography variant="body2" color="text.secondary">ML Score</Typography>
+                          <LinearProgress 
+                            variant="determinate" 
+                            value={Math.abs(signalsData.current_signal.ml_score) * 50 + 50} 
+                            sx={{ mb: 1 }}
+                          />
+                          <Typography variant="body2">
+                            {signalsData.current_signal.ml_score.toFixed(3)}
+                          </Typography>
+                        </Grid>
+                      </Grid>
+                    ) : (
+                      <Box sx={{ textAlign: 'center', py: 4 }}>
+                        <Typography variant="body2" color="text.secondary">
+                          Signal components will appear after running a backtest.
+                        </Typography>
+                      </Box>
+                    )}
+                  </CardContent>
+                </Card>
+              </Grid>
+
+              {/* Recent Signals Table */}
+              <Grid item xs={12}>
+                <Card>
+                  <CardContent>
+                    <Typography variant="h6" gutterBottom>
+                      Recent Signals ({signalsData?.total_signals || 0})
+                    </Typography>
+                    <TableContainer>
+                      <Table size="small">
+                        <TableHead>
+                          <TableRow>
+                            <TableCell>Date</TableCell>
+                            <TableCell>Signal</TableCell>
+                            <TableCell align="right">Price</TableCell>
+                            <TableCell align="right">Confidence</TableCell>
+                            <TableCell align="right">RSI</TableCell>
+                            <TableCell align="right">Volume Ratio</TableCell>
+                            <TableCell>Regime</TableCell>
+                          </TableRow>
+                        </TableHead>
+                        <TableBody>
+                          {signalsData?.recent_signals && signalsData.recent_signals.length > 0 ? (
+                            signalsData.recent_signals.slice(0, 20).map((signal: any, index: number) => (
+                              <TableRow key={index}>
+                                <TableCell>{signal.date}</TableCell>
+                                <TableCell>
+                                  <Chip
+                                    label={signal.signal}
+                                    color={signal.signal === 'BUY' ? 'success' : signal.signal === 'SELL' ? 'error' : 'default'}
+                                    size="small"
+                                  />
+                                </TableCell>
+                                <TableCell align="right">${signal.price.toFixed(2)}</TableCell>
+                                <TableCell align="right">{(signal.confidence * 100).toFixed(1)}%</TableCell>
+                                <TableCell align="right">{signal.rsi.toFixed(1)}</TableCell>
+                                <TableCell align="right">{signal.volume_ratio.toFixed(2)}x</TableCell>
+                                <TableCell sx={{ textTransform: 'capitalize' }}>{signal.market_regime}</TableCell>
+                              </TableRow>
+                            ))
+                          ) : (
+                            <TableRow>
+                              <TableCell colSpan={7} align="center">
+                                <Typography variant="body2" color="text.secondary" sx={{ py: 2 }}>
+                                  No recent signals available. Run a backtest to generate signals.
+                                </Typography>
+                              </TableCell>
+                            </TableRow>
+                          )}
+                        </TableBody>
+                      </Table>
+                    </TableContainer>
+                  </CardContent>
+                </Card>
+              </Grid>
+            </Grid>
+          </motion.div>
+        )}
+
+        {activeTab === 3 && (
           <motion.div
             key="watchlist"
             initial={{ opacity: 0, x: 20 }}
@@ -747,7 +1010,7 @@ const Dashboard: React.FC = () => {
           </motion.div>
         )}
 
-        {activeTab === 3 && (
+        {activeTab === 4 && (
           <motion.div
             key="risk"
             initial={{ opacity: 0, x: 20 }}
@@ -762,32 +1025,43 @@ const Dashboard: React.FC = () => {
                     <Typography variant="h6" gutterBottom>
                       Risk Metrics
                     </Typography>
-                    <Grid container spacing={2}>
-                      <Grid item xs={6}>
-                        <Typography variant="body2" color="text.secondary">Value at Risk (95%)</Typography>
-                        <Typography variant="h6" color="error.main">
-                          {dashboardData.riskMetrics.var.toFixed(1)}%
-                        </Typography>
+                    {dashboardData.totalTrades > 0 ? (
+                      <Grid container spacing={2}>
+                        <Grid item xs={6}>
+                          <Typography variant="body2" color="text.secondary">Value at Risk (95%)</Typography>
+                          <Typography variant="h6" color="error.main">
+                            {dashboardData.riskMetrics.var.toFixed(1)}%
+                          </Typography>
+                        </Grid>
+                        <Grid item xs={6}>
+                          <Typography variant="body2" color="text.secondary">Beta</Typography>
+                          <Typography variant="h6" color="primary">
+                            {dashboardData.riskMetrics.beta.toFixed(2)}
+                          </Typography>
+                        </Grid>
+                        <Grid item xs={6}>
+                          <Typography variant="body2" color="text.secondary">Alpha</Typography>
+                          <Typography variant="h6" color="success.main">
+                            {dashboardData.riskMetrics.alpha.toFixed(1)}%
+                          </Typography>
+                        </Grid>
+                        <Grid item xs={6}>
+                          <Typography variant="body2" color="text.secondary">Volatility</Typography>
+                          <Typography variant="h6" color="warning.main">
+                            {dashboardData.riskMetrics.volatility.toFixed(1)}%
+                          </Typography>
+                        </Grid>
                       </Grid>
-                      <Grid item xs={6}>
-                        <Typography variant="body2" color="text.secondary">Beta</Typography>
-                        <Typography variant="h6" color="primary">
-                          {dashboardData.riskMetrics.beta.toFixed(2)}
+                    ) : (
+                      <Box sx={{ textAlign: 'center', py: 4 }}>
+                        <Typography variant="h6" color="text.secondary" gutterBottom>
+                          No Risk Data Available
                         </Typography>
-                      </Grid>
-                      <Grid item xs={6}>
-                        <Typography variant="body2" color="text.secondary">Alpha</Typography>
-                        <Typography variant="h6" color="success.main">
-                          {dashboardData.riskMetrics.alpha.toFixed(1)}%
+                        <Typography variant="body2" color="text.secondary">
+                          Run a backtest to generate risk metrics and performance analysis.
                         </Typography>
-                      </Grid>
-                      <Grid item xs={6}>
-                        <Typography variant="body2" color="text.secondary">Volatility</Typography>
-                        <Typography variant="h6" color="warning.main">
-                          {dashboardData.riskMetrics.volatility.toFixed(1)}%
-                        </Typography>
-                      </Grid>
-                    </Grid>
+                      </Box>
+                    )}
                   </CardContent>
                 </Card>
               </Grid>
@@ -798,21 +1072,32 @@ const Dashboard: React.FC = () => {
                     <Typography variant="h6" gutterBottom>
                       Drawdown Analysis
                     </Typography>
-                    <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
-                      <Warning color="error" sx={{ mr: 1 }} />
-                      <Typography variant="h6" color="error.main">
-                        Max Drawdown: {dashboardData.maxDrawdown.toFixed(1)}%
-                      </Typography>
-                    </Box>
-                    <Typography variant="body2" color="text.secondary">
-                      Current drawdown: -2.3% (within acceptable range)
-                    </Typography>
-                    <LinearProgress
-                      variant="determinate"
-                      value={Math.abs(dashboardData.maxDrawdown) / 20 * 100}
-                      sx={{ mt: 1, height: 8, borderRadius: 4 }}
-                      color={Math.abs(dashboardData.maxDrawdown) > 10 ? 'error' : 'success'}
-                    />
+                    {dashboardData.totalTrades > 0 ? (
+                      <>
+                        <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
+                          <Warning color="error" sx={{ mr: 1 }} />
+                          <Typography variant="h6" color="error.main">
+                            Max Drawdown: {dashboardData.maxDrawdown.toFixed(1)}%
+                          </Typography>
+                        </Box>
+                        <Typography variant="body2" color="text.secondary">
+                          Current drawdown: {dashboardData.maxDrawdown.toFixed(1)}% 
+                          {Math.abs(dashboardData.maxDrawdown) < 10 ? ' (within acceptable range)' : ' (high risk)'}
+                        </Typography>
+                        <LinearProgress
+                          variant="determinate"
+                          value={Math.abs(dashboardData.maxDrawdown) / 20 * 100}
+                          sx={{ mt: 1, height: 8, borderRadius: 4 }}
+                          color={Math.abs(dashboardData.maxDrawdown) > 10 ? 'error' : 'success'}
+                        />
+                      </>
+                    ) : (
+                      <Box sx={{ textAlign: 'center', py: 4 }}>
+                        <Typography variant="body2" color="text.secondary">
+                          Drawdown analysis will appear after running a backtest.
+                        </Typography>
+                      </Box>
+                    )}
                   </CardContent>
                 </Card>
               </Grid>
@@ -823,47 +1108,58 @@ const Dashboard: React.FC = () => {
                     <Typography variant="h6" gutterBottom>
                       Risk-Adjusted Performance
                     </Typography>
-                    <Grid container spacing={3}>
-                      <Grid item xs={12} md={4}>
-                        <Box sx={{ textAlign: 'center', p: 2 }}>
-                          <Typography variant="h4" color="primary" gutterBottom>
-                            {dashboardData.sharpeRatio.toFixed(2)}
-                          </Typography>
-                          <Typography variant="body2" color="text.secondary">
-                            Sharpe Ratio
-                          </Typography>
-                          <Typography variant="caption" color="success.main">
-                            Excellent (&gt;1.0)
-                          </Typography>
-                        </Box>
+                    {dashboardData.totalTrades > 0 ? (
+                      <Grid container spacing={3}>
+                        <Grid item xs={12} md={4}>
+                          <Box sx={{ textAlign: 'center', p: 2 }}>
+                            <Typography variant="h4" color="primary" gutterBottom>
+                              {dashboardData.sharpeRatio.toFixed(2)}
+                            </Typography>
+                            <Typography variant="body2" color="text.secondary">
+                              Sharpe Ratio
+                            </Typography>
+                            <Typography variant="caption" color={dashboardData.sharpeRatio > 1.0 ? 'success.main' : dashboardData.sharpeRatio > 0.5 ? 'warning.main' : 'error.main'}>
+                              {dashboardData.sharpeRatio > 1.0 ? 'Excellent (>1.0)' : dashboardData.sharpeRatio > 0.5 ? 'Good (>0.5)' : 'Poor (<0.5)'}
+                            </Typography>
+                          </Box>
+                        </Grid>
+                        <Grid item xs={12} md={4}>
+                          <Box sx={{ textAlign: 'center', p: 2 }}>
+                            <Typography variant="h4" color="secondary" gutterBottom>
+                              {dashboardData.maxDrawdown !== 0 ? (dashboardData.totalReturn / Math.abs(dashboardData.maxDrawdown)).toFixed(2) : 'N/A'}
+                            </Typography>
+                            <Typography variant="body2" color="text.secondary">
+                              Calmar Ratio
+                            </Typography>
+                            <Typography variant="caption" color={dashboardData.maxDrawdown !== 0 && (dashboardData.totalReturn / Math.abs(dashboardData.maxDrawdown)) > 0.5 ? 'success.main' : 'warning.main'}>
+                              {dashboardData.maxDrawdown !== 0 ? (dashboardData.totalReturn / Math.abs(dashboardData.maxDrawdown)) > 0.5 ? 'Good (>0.5)' : 'Poor (<0.5)' : 'N/A'}
+                            </Typography>
+                          </Box>
+                        </Grid>
+                        <Grid item xs={12} md={4}>
+                          <Box sx={{ textAlign: 'center', p: 2 }}>
+                            <Typography variant="h4" color="info.main" gutterBottom>
+                              {dashboardData.winRate.toFixed(1)}%
+                            </Typography>
+                            <Typography variant="body2" color="text.secondary">
+                              Win Rate
+                            </Typography>
+                            <Typography variant="caption" color={dashboardData.winRate > 60 ? 'success.main' : dashboardData.winRate > 40 ? 'warning.main' : 'error.main'}>
+                              {dashboardData.winRate > 60 ? 'Above Average (>60%)' : dashboardData.winRate > 40 ? 'Average (40-60%)' : 'Below Average (<40%)'}
+                            </Typography>
+                          </Box>
+                        </Grid>
                       </Grid>
-                      <Grid item xs={12} md={4}>
-                        <Box sx={{ textAlign: 'center', p: 2 }}>
-                          <Typography variant="h4" color="secondary" gutterBottom>
-                            {(dashboardData.totalReturn / Math.abs(dashboardData.maxDrawdown)).toFixed(2)}
-                          </Typography>
-                          <Typography variant="body2" color="text.secondary">
-                            Calmar Ratio
-                          </Typography>
-                          <Typography variant="caption" color="success.main">
-                            Good (&gt;1.0)
-                          </Typography>
-                        </Box>
-                      </Grid>
-                      <Grid item xs={12} md={4}>
-                        <Box sx={{ textAlign: 'center', p: 2 }}>
-                          <Typography variant="h4" color="info.main" gutterBottom>
-                            {dashboardData.winRate.toFixed(1)}%
-                          </Typography>
-                          <Typography variant="body2" color="text.secondary">
-                            Win Rate
-                          </Typography>
-                          <Typography variant="caption" color="success.main">
-                            Above Average (&gt;60%)
-                          </Typography>
-                        </Box>
-                      </Grid>
-                    </Grid>
+                    ) : (
+                      <Box sx={{ textAlign: 'center', py: 4 }}>
+                        <Typography variant="h6" color="text.secondary" gutterBottom>
+                          No Performance Data Available
+                        </Typography>
+                        <Typography variant="body2" color="text.secondary">
+                          Run a backtest to generate risk-adjusted performance metrics.
+                        </Typography>
+                      </Box>
+                    )}
                   </CardContent>
                 </Card>
               </Grid>
