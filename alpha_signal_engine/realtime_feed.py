@@ -10,11 +10,26 @@ import websocket
 import json
 import threading
 import time
+import random
 from typing import Dict, List, Optional, Callable
 from datetime import datetime, timedelta
+from enum import Enum
 import warnings
 
 warnings.filterwarnings('ignore')
+
+# Import the advanced live signal generator
+try:
+    from .live_signal_generator import LiveSignalGenerator
+except ImportError:
+    LiveSignalGenerator = None
+
+
+class MarketState(Enum):
+    """Market state enumeration for stateful simulation."""
+    TRENDING_UP = "trending_up"
+    TRENDING_DOWN = "trending_down"
+    RANGING = "ranging"
 
 
 class RealTimeDataFeed:
@@ -53,6 +68,19 @@ class RealTimeDataFeed:
         self.current_signal = 0
         self.signal_history = []
         
+        # Stateful simulation properties
+        self.current_market_state = MarketState.RANGING
+        self.state_start_time = datetime.now()
+        self.state_duration = random.randint(30, 90)  # 30-90 seconds per state
+        self.state_transition_count = 0
+        self.last_signal_time = datetime.now()
+        self.signal_cooldown = 2  # Minimum seconds between signals
+        
+        # Advanced signal generation
+        self.advanced_mode = False
+        self.live_signal_generator = None
+        self.model_path = None
+        
     def start_feed(self, on_data_callback: Optional[Callable] = None,
                    on_signal_callback: Optional[Callable] = None):
         """
@@ -77,11 +105,44 @@ class RealTimeDataFeed:
         
         print(f"🚀 Real-time feed started for {self.symbol}")
     
+    def enable_advanced_mode(self, model_path: Optional[str] = None):
+        """
+        Enable advanced signal generation with ML model and Kalman filtering.
+        
+        Args:
+            model_path: Path to pre-trained ML model file
+        """
+        if LiveSignalGenerator is None:
+            print("⚠️ Advanced mode not available - LiveSignalGenerator not found")
+            return
+        
+        try:
+            self.model_path = model_path
+            self.live_signal_generator = LiveSignalGenerator(self.config, model_path)
+            self.advanced_mode = True
+            print("🧠 Advanced mode enabled with ML model and Kalman filtering")
+        except Exception as e:
+            print(f"❌ Failed to enable advanced mode: {e}")
+            self.advanced_mode = False
+    
+    def disable_advanced_mode(self):
+        """Disable advanced mode and return to basic simulation."""
+        if self.live_signal_generator:
+            self.live_signal_generator.stop()
+            self.live_signal_generator = None
+        self.advanced_mode = False
+        print("📊 Switched to basic simulation mode")
+    
     def stop_feed(self):
         """Stop the real-time data feed."""
         self.is_connected = False
         if self.ws:
             self.ws.close()
+        
+        # Stop advanced signal generator if active
+        if self.live_signal_generator:
+            self.live_signal_generator.stop()
+        
         print("🛑 Real-time feed stopped")
     
     def _connect_websocket(self):
@@ -140,21 +201,33 @@ class RealTimeDataFeed:
                 # Trigger callbacks
                 self._trigger_callbacks('data', data_point)
                 
-                # Generate signal if enough data
-                if len(self.data_buffer) >= 20:
-                    signal = self._generate_realtime_signal()
-                    if signal != self.current_signal:
-                        self.current_signal = signal
-                        self.signal_history.append({
-                            'timestamp': datetime.now(),
-                            'signal': signal,
-                            'price': new_price
-                        })
-                        self._trigger_callbacks('signal', {
-                            'timestamp': datetime.now(),
-                            'signal': signal,
-                            'price': new_price
-                        })
+                # Generate signal using appropriate method
+                if self.advanced_mode and self.live_signal_generator:
+                    # Use advanced ML-powered signal generation
+                    signal_data = self.live_signal_generator.add_data_point(data_point)
+                    if signal_data and signal_data['signal'] != self.current_signal:
+                        self.current_signal = signal_data['signal']
+                        self.signal_history.append(signal_data)
+                        self._trigger_callbacks('signal', signal_data)
+                else:
+                    # Use basic stateful simulation
+                    if len(self.data_buffer) >= 5:
+                        signal = self._generate_realtime_signal()
+                        if signal != self.current_signal:
+                            self.current_signal = signal
+                            confidence = self._get_confidence_score()
+                            
+                            signal_data = {
+                                'timestamp': datetime.now(),
+                                'signal': signal,
+                                'price': new_price,
+                                'confidence': confidence,
+                                'market_state': self.current_market_state.value,
+                                'state_duration': (datetime.now() - self.state_start_time).total_seconds()
+                            }
+                            
+                            self.signal_history.append(signal_data)
+                            self._trigger_callbacks('signal', signal_data)
                 
                 time.sleep(1)  # 1-second intervals
         
@@ -164,31 +237,111 @@ class RealTimeDataFeed:
         simulation_thread.start()
     
     def _generate_realtime_signal(self) -> int:
-        """Generate real-time trading signal."""
-        if len(self.data_buffer) < 20:
+        """Generate stateful real-time trading signal with market memory."""
+        if len(self.data_buffer) < 5:  # Reduced requirement for faster response
             return 0
         
-        # Convert buffer to DataFrame
-        df = pd.DataFrame(self.data_buffer)
-        df.set_index('timestamp', inplace=True)
+        # Check if we should transition to a new market state
+        self._check_state_transition()
         
-        # Calculate technical indicators
-        returns = df['close'].pct_change()
-        sma_10 = df['close'].rolling(window=10).mean()
-        sma_20 = df['close'].rolling(window=20).mean()
+        # Check signal cooldown to avoid too frequent signals
+        current_time = datetime.now()
+        if (current_time - self.last_signal_time).total_seconds() < self.signal_cooldown:
+            return 0
         
-        # Simple signal logic
-        current_price = df['close'].iloc[-1]
-        current_sma_10 = sma_10.iloc[-1]
-        current_sma_20 = sma_20.iloc[-1]
+        # Generate signal based on current market state
+        signal = self._generate_state_based_signal()
         
-        # Momentum signal
-        if current_sma_10 > current_sma_20 and current_price > current_sma_10:
-            return 1  # Buy signal
-        elif current_sma_10 < current_sma_20 and current_price < current_sma_10:
-            return -1  # Sell signal
+        # Update last signal time if we generated a non-zero signal
+        if signal != 0:
+            self.last_signal_time = current_time
         
-        return 0  # Hold
+        return signal
+    
+    def _check_state_transition(self):
+        """Check if it's time to transition to a new market state."""
+        current_time = datetime.now()
+        time_in_state = (current_time - self.state_start_time).total_seconds()
+        
+        if time_in_state >= self.state_duration:
+            self._transition_to_new_state()
+    
+    def _transition_to_new_state(self):
+        """Transition to a new market state."""
+        # Define transition probabilities
+        transition_matrix = {
+            MarketState.TRENDING_UP: {
+                MarketState.TRENDING_UP: 0.3,    # Stay in trend
+                MarketState.TRENDING_DOWN: 0.2,  # Reverse trend
+                MarketState.RANGING: 0.5         # Go to ranging
+            },
+            MarketState.TRENDING_DOWN: {
+                MarketState.TRENDING_UP: 0.2,    # Reverse trend
+                MarketState.TRENDING_DOWN: 0.3,  # Stay in trend
+                MarketState.RANGING: 0.5         # Go to ranging
+            },
+            MarketState.RANGING: {
+                MarketState.TRENDING_UP: 0.4,    # Start uptrend
+                MarketState.TRENDING_DOWN: 0.4,  # Start downtrend
+                MarketState.RANGING: 0.2         # Stay ranging
+            }
+        }
+        
+        # Select new state based on probabilities
+        current_state = self.current_market_state
+        probabilities = transition_matrix[current_state]
+        
+        rand = random.random()
+        cumulative = 0
+        
+        for new_state, prob in probabilities.items():
+            cumulative += prob
+            if rand <= cumulative:
+                self.current_market_state = new_state
+                break
+        
+        # Update state tracking
+        self.state_start_time = datetime.now()
+        self.state_duration = random.randint(30, 90)  # New random duration
+        self.state_transition_count += 1
+        
+        print(f"🔄 Market state transitioned to: {self.current_market_state.value}")
+    
+    def _generate_state_based_signal(self) -> int:
+        """Generate signal based on current market state."""
+        rand = random.random()
+        
+        if self.current_market_state == MarketState.TRENDING_UP:
+            # Trending up: 80% BUY, 20% HOLD
+            if rand < 0.8:
+                return 1  # Buy signal
+            else:
+                return 0  # Hold signal
+                
+        elif self.current_market_state == MarketState.TRENDING_DOWN:
+            # Trending down: 80% SELL, 20% HOLD
+            if rand < 0.8:
+                return -1  # Sell signal
+            else:
+                return 0  # Hold signal
+                
+        else:  # RANGING
+            # Ranging: 90% HOLD, 5% BUY, 5% SELL
+            if rand < 0.9:
+                return 0  # Hold signal
+            elif rand < 0.95:
+                return 1  # Buy signal
+            else:
+                return -1  # Sell signal
+    
+    def _get_confidence_score(self) -> float:
+        """Get confidence score based on current market state."""
+        if self.current_market_state in [MarketState.TRENDING_UP, MarketState.TRENDING_DOWN]:
+            # Strong trend: high confidence (75-95%)
+            return random.uniform(0.75, 0.95)
+        else:  # RANGING
+            # Ranging market: low confidence (40-60%)
+            return random.uniform(0.40, 0.60)
     
     def _trigger_callbacks(self, callback_type: str, data: Dict):
         """Trigger registered callbacks."""
@@ -261,6 +414,71 @@ class RealTimeDataFeed:
     def get_data_buffer(self) -> List[Dict]:
         """Get current data buffer."""
         return self.data_buffer.copy()
+    
+    def get_current_market_state(self) -> Dict:
+        """Get current market state information."""
+        return {
+            'state': self.current_market_state.value,
+            'state_start_time': self.state_start_time,
+            'state_duration': self.state_duration,
+            'time_in_state': (datetime.now() - self.state_start_time).total_seconds(),
+            'transition_count': self.state_transition_count,
+            'current_signal': self.current_signal,
+            'last_signal_time': self.last_signal_time
+        }
+    
+    def get_simulation_stats(self) -> Dict:
+        """Get simulation statistics."""
+        if not self.signal_history:
+            return {'total_signals': 0, 'state_distribution': {}}
+        
+        # Count signals by state
+        state_counts = {}
+        signal_counts = {'BUY': 0, 'SELL': 0, 'HOLD': 0}
+        
+        for signal_data in self.signal_history:
+            state = signal_data.get('market_state', 'unknown')
+            signal = signal_data.get('signal', 0)
+            
+            state_counts[state] = state_counts.get(state, 0) + 1
+            
+            if signal > 0:
+                signal_counts['BUY'] += 1
+            elif signal < 0:
+                signal_counts['SELL'] += 1
+            else:
+                signal_counts['HOLD'] += 1
+        
+        return {
+            'total_signals': len(self.signal_history),
+            'state_distribution': state_counts,
+            'signal_distribution': signal_counts,
+            'current_state': self.current_market_state.value,
+            'state_transitions': self.state_transition_count
+        }
+    
+    def get_advanced_mode_info(self) -> Dict:
+        """Get information about advanced mode status."""
+        if not self.advanced_mode or not self.live_signal_generator:
+            return {
+                'advanced_mode': False,
+                'model_loaded': False,
+                'kalman_filter_active': False
+            }
+        
+        model_info = self.live_signal_generator.get_model_info()
+        performance_metrics = self.live_signal_generator.get_performance_metrics()
+        
+        return {
+            'advanced_mode': True,
+            'model_loaded': model_info['model_loaded'],
+            'model_last_updated': model_info['last_updated'],
+            'retraining_active': model_info['retraining_active'],
+            'retraining_data_points': model_info['retraining_data_points'],
+            'total_signals': performance_metrics['total_signals'],
+            'kalman_filter_active': True,
+            'model_path': self.model_path
+        }
 
 
 class LiveSignalGenerator:

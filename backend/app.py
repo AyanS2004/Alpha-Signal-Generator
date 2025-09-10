@@ -253,10 +253,44 @@ def get_dashboard_data():
                     'value': i * 0.1  # Simple linear benchmark
                 })
 
+        # Calculate beta against SPY benchmark
+        beta = 0.0
+        try:
+            if sig is not None and not sig.empty and len(bt.get('equity', [])) > 1:
+                # Get SPY data for the same period
+                spy = yf.Ticker("SPY")
+                start_date = sig.index[0].strftime('%Y-%m-%d')
+                end_date = sig.index[-1].strftime('%Y-%m-%d')
+                spy_hist = spy.history(start=start_date, end=end_date)
+                
+                if not spy_hist.empty and len(spy_hist) > 1:
+                    # Calculate strategy returns
+                    equity_series = pd.Series(bt['equity'])
+                    strategy_returns = equity_series.pct_change().dropna()
+                    
+                    # Calculate SPY returns
+                    spy_returns = spy_hist['Close'].pct_change().dropna()
+                    
+                    # Align the series by date
+                    min_length = min(len(strategy_returns), len(spy_returns))
+                    if min_length > 1:
+                        strategy_returns = strategy_returns.iloc[:min_length]
+                        spy_returns = spy_returns.iloc[:min_length]
+                        
+                        # Calculate beta: covariance(strategy, market) / variance(market)
+                        covariance = np.cov(strategy_returns, spy_returns)[0, 1]
+                        market_variance = np.var(spy_returns)
+                        
+                        if market_variance > 0:
+                            beta = float(covariance / market_variance)
+        except Exception as e:
+            logger.warning(f"Could not calculate beta: {str(e)}")
+            beta = 0.0
+
         # Risk metrics
         risk = {
             'var': float(perf.get('var_95', 0) * 100),
-            'beta': 0.0,
+            'beta': beta,
             'alpha': float(perf.get('annualized_return', 0) * 100),
             'volatility': float(perf.get('volatility', 0) * 100),
         }
@@ -601,6 +635,11 @@ def realtime_latest():
         if not latest:
             return jsonify({'connected': False})
 
+        # Check if advanced mode is available
+        advanced_info = {}
+        if hasattr(ALPACA_FEED, 'get_advanced_mode_info'):
+            advanced_info = ALPACA_FEED.get_advanced_mode_info()
+
         # Try to access indicators if available from simulated feed
         signal = None
         confidence = None
@@ -628,6 +667,7 @@ def realtime_latest():
         resp = {
             'connected': True,
             'tick': latest,
+            'advanced_mode': advanced_info
         }
         if signal is not None:
             resp['signal'] = signal
@@ -638,6 +678,63 @@ def realtime_latest():
         return jsonify({'connected': False})
     except Exception as e:
         logger.exception("realtime:latest:error")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/realtime/advanced/enable', methods=['POST'])
+def enable_advanced_mode():
+    """Enable advanced ML-powered signal generation."""
+    try:
+        global ALPACA_FEED
+        if ALPACA_FEED is None:
+            return jsonify({'error': 'No active feed'}), 400
+        
+        data = request.json or {}
+        model_path = data.get('model_path')
+        
+        if hasattr(ALPACA_FEED, 'enable_advanced_mode'):
+            ALPACA_FEED.enable_advanced_mode(model_path)
+            return jsonify({'status': 'success', 'message': 'Advanced mode enabled'})
+        else:
+            return jsonify({'error': 'Advanced mode not supported'}), 400
+            
+    except Exception as e:
+        logger.exception("realtime:advanced:enable:error")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/realtime/advanced/disable', methods=['POST'])
+def disable_advanced_mode():
+    """Disable advanced mode and return to basic simulation."""
+    try:
+        global ALPACA_FEED
+        if ALPACA_FEED is None:
+            return jsonify({'error': 'No active feed'}), 400
+        
+        if hasattr(ALPACA_FEED, 'disable_advanced_mode'):
+            ALPACA_FEED.disable_advanced_mode()
+            return jsonify({'status': 'success', 'message': 'Advanced mode disabled'})
+        else:
+            return jsonify({'error': 'Advanced mode not supported'}), 400
+            
+    except Exception as e:
+        logger.exception("realtime:advanced:disable:error")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/realtime/advanced/status', methods=['GET'])
+def get_advanced_status():
+    """Get advanced mode status and statistics."""
+    try:
+        global ALPACA_FEED
+        if ALPACA_FEED is None:
+            return jsonify({'error': 'No active feed'}), 400
+        
+        if hasattr(ALPACA_FEED, 'get_advanced_mode_info'):
+            info = ALPACA_FEED.get_advanced_mode_info()
+            return jsonify(info)
+        else:
+            return jsonify({'error': 'Advanced mode not supported'}), 400
+            
+    except Exception as e:
+        logger.exception("realtime:advanced:status:error")
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/stocks/search', methods=['GET'])
@@ -907,6 +1004,128 @@ def risk_plots():
         return send_file(zip_path, as_attachment=True, download_name='risk_plots.zip')
     except Exception as e:
         logger.exception('risk_plots:error')
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/ml/feature-importance', methods=['GET'])
+def get_feature_importance():
+    """Get ML model feature importances from the last trained model."""
+    try:
+        global engine
+        if engine is None or engine.get_signals() is None:
+            return jsonify({'error': 'No ML model available. Run a backtest first.'}), 400
+        
+        # Get the advanced signal generator from the engine
+        advanced_generator = engine.signal_generator.advanced_generator
+        
+        if advanced_generator.ml_model is None:
+            return jsonify({'error': 'No trained ML model found.'}), 400
+        
+        # Get feature importances from the trained model
+        feature_importances = advanced_generator.ml_model.feature_importances_
+        
+        # Get feature names from the last feature creation
+        # We need to recreate the features to get the names
+        signals = engine.get_signals()
+        if signals is None or signals.empty:
+            return jsonify({'error': 'No signals data available.'}), 400
+        
+        # Create features to get feature names
+        features = advanced_generator._create_ml_features(signals)
+        feature_names = features.columns.tolist()
+        
+        # Combine feature names with importances
+        feature_importance_data = []
+        for name, importance in zip(feature_names, feature_importances):
+            feature_importance_data.append({
+                'name': name,
+                'importance': float(importance)
+            })
+        
+        # Sort by importance (descending)
+        feature_importance_data.sort(key=lambda x: x['importance'], reverse=True)
+        
+        # Return top 10 most important features
+        return jsonify({
+            'feature_importances': feature_importance_data[:10],
+            'total_features': len(feature_names)
+        })
+        
+    except Exception as e:
+        logger.exception('feature_importance:error')
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/ml/evaluation', methods=['GET'])
+def get_ml_evaluation():
+    """Get ML model evaluation metrics including confusion matrix and market regime distribution."""
+    try:
+        global engine
+        if engine is None or engine.get_signals() is None:
+            return jsonify({'error': 'No ML data available. Run a backtest first.'}), 400
+        
+        signals = engine.get_signals()
+        if signals is None or signals.empty:
+            return jsonify({'error': 'No signals data available.'}), 400
+        
+        # Get market regime distribution
+        regime_counts = signals['market_regime'].value_counts().to_dict()
+        regime_distribution = []
+        total_regimes = len(signals)
+        
+        for regime, count in regime_counts.items():
+            regime_distribution.append({
+                'regime': regime,
+                'count': int(count),
+                'percentage': float(count / total_regimes * 100)
+            })
+        
+        # Calculate confusion matrix if we have ML predictions and actual outcomes
+        confusion_matrix = None
+        if 'ml_signal' in signals.columns and 'final_signal' in signals.columns:
+            # Create binary predictions and actuals
+            ml_predictions = (signals['ml_signal'] > 0).astype(int)
+            actual_outcomes = (signals['final_signal'] > 0).astype(int)
+            
+            # Calculate confusion matrix components
+            true_positives = int(((ml_predictions == 1) & (actual_outcomes == 1)).sum())
+            false_positives = int(((ml_predictions == 1) & (actual_outcomes == 0)).sum())
+            true_negatives = int(((ml_predictions == 0) & (actual_outcomes == 0)).sum())
+            false_negatives = int(((ml_predictions == 0) & (actual_outcomes == 1)).sum())
+            
+            confusion_matrix = {
+                'true_positives': true_positives,
+                'false_positives': false_positives,
+                'true_negatives': true_negatives,
+                'false_negatives': false_negatives,
+                'accuracy': float((true_positives + true_negatives) / (true_positives + false_positives + true_negatives + false_negatives)) if (true_positives + false_positives + true_negatives + false_negatives) > 0 else 0.0,
+                'precision': float(true_positives / (true_positives + false_positives)) if (true_positives + false_positives) > 0 else 0.0,
+                'recall': float(true_positives / (true_positives + false_negatives)) if (true_positives + false_negatives) > 0 else 0.0
+            }
+        
+        # Get ML confidence distribution
+        confidence_distribution = []
+        if 'ml_confidence' in signals.columns:
+            confidences = signals['ml_confidence'].dropna()
+            if len(confidences) > 0:
+                # Create histogram bins
+                bins = np.linspace(0, 1, 11)  # 10 bins from 0 to 1
+                hist, bin_edges = np.histogram(confidences, bins=bins)
+                
+                for i in range(len(hist)):
+                    confidence_distribution.append({
+                        'range': f"{bin_edges[i]:.1f}-{bin_edges[i+1]:.1f}",
+                        'count': int(hist[i]),
+                        'percentage': float(hist[i] / len(confidences) * 100)
+                    })
+        
+        return jsonify({
+            'market_regime_distribution': regime_distribution,
+            'confusion_matrix': confusion_matrix,
+            'confidence_distribution': confidence_distribution,
+            'total_predictions': len(signals)
+        })
+        
+    except Exception as e:
+        logger.exception('ml_evaluation:error')
         return jsonify({'error': str(e)}), 500
 
 if __name__ == '__main__':

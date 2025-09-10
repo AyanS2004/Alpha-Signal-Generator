@@ -21,13 +21,13 @@ class Config:
     
     # Momentum strategy parameters
     momentum_lookback: int = 10
-    momentum_threshold: float = 0.02  # 2% price change
-    momentum_volume_threshold: float = 1.2  # relaxed volume confirmation (was 1.5)
+    momentum_threshold: float = 0.01  # 1% price change (reduced from 2% for more signals)
+    momentum_volume_threshold: float = 1.1  # more relaxed volume confirmation
     
     # Mean reversion strategy parameters
     mean_reversion_lookback: int = 20
-    mean_reversion_std_multiplier: float = 2.0
-    mean_reversion_threshold: float = 0.01  # 1% deviation
+    mean_reversion_std_multiplier: float = 1.5  # reduced from 2.0 for more signals
+    mean_reversion_threshold: float = 0.005  # 0.5% deviation (reduced from 1%)
     
     # Risk management
     max_position_size: float = 0.3  # 30% max position
@@ -47,7 +47,7 @@ class Config:
     use_numba: bool = True
 
     # Signal combination
-    final_signal_threshold: float = 0.25  # slightly lower to increase entries
+    final_signal_threshold: float = 0.15  # lower threshold to increase entries
     
     def __post_init__(self):
         """Validate configuration parameters."""
