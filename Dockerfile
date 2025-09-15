@@ -8,12 +8,13 @@ WORKDIR /app/frontend
 COPY frontend/package*.json ./
 
 # Install frontend dependencies
-RUN npm ci --only=production
+RUN npm ci || npm install
 
 # Copy frontend source code
 COPY frontend/ ./
 
 # Build frontend for production
+ENV CI=false
 RUN npm run build
 
 # Python backend stage
