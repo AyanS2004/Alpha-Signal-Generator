@@ -1,8 +1,9 @@
 import React, { useState } from 'react';
-import { Box, Typography, Paper, Grid, Slider, Button, TextField, Chip, LinearProgress } from '@mui/material';
+import { Box, Typography, Paper, Grid, Button, TextField, Chip, LinearProgress } from '@mui/material';
 import { Tune, PlayArrow } from '@mui/icons-material';
 import { motion } from 'framer-motion';
 import axios from 'axios';
+import { api, endpoints } from '../api';
 
 type Range = number[];
 
@@ -14,6 +15,8 @@ const Optimization: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [bestParams, setBestParams] = useState<Record<string, any> | null>(null);
   const [bestSharpe, setBestSharpe] = useState<number | null>(null);
+  const [bayesRunning, setBayesRunning] = useState(false);
+  const [wfSummary, setWfSummary] = useState<any>(null);
 
   const buildRangeArray = (range: Range) => {
     const [start, end, step] = range;
@@ -38,6 +41,25 @@ const Optimization: React.FC = () => {
     } finally {
       setLoading(false);
     }
+  };
+
+  const onRunBayesian = async () => {
+    setBayesRunning(true);
+    try {
+      const { data } = await api.post(endpoints.optimizeBayesian, { csvPath });
+      setBestParams(data.bestParams);
+      setBestSharpe(data.bestSharpe);
+    } catch {}
+    finally { setBayesRunning(false); }
+  };
+
+  const onWalkForward = async () => {
+    setBayesRunning(true);
+    try {
+      const { data } = await api.post(endpoints.walkForward, { csvPath });
+      setWfSummary(data);
+    } catch {}
+    finally { setBayesRunning(false); }
   };
 
   return (
@@ -87,6 +109,15 @@ const Optimization: React.FC = () => {
                   {loading ? 'Running Optimization...' : 'Run Optimization'}
                 </Button>
 
+                <Box className="grid grid-cols-2 gap-2">
+                  <Button variant="outlined" onClick={onRunBayesian} disabled={bayesRunning}>
+                    {bayesRunning ? 'Running Bayesian...' : 'Bayesian Optimize'}
+                  </Button>
+                  <Button variant="outlined" onClick={onWalkForward} disabled={bayesRunning}>
+                    {bayesRunning ? 'Running WFO...' : 'Walk-Forward Test'}
+                  </Button>
+                </Box>
+
                 {loading && <LinearProgress />}
               </Box>
             </Paper>
@@ -114,6 +145,17 @@ const Optimization: React.FC = () => {
                 </Box>
               ) : (
                 <Typography color="text.secondary">Run an optimization to see results.</Typography>
+              )}
+
+              {wfSummary && (
+                <Box sx={{ mt: 3 }}>
+                  <Typography variant="subtitle1">Walk-Forward Summary</Typography>
+                  <Box className="flex flex-wrap gap-2 mt-2">
+                    <Chip label={`Agg Sharpe: ${wfSummary.aggregated_sharpe.toFixed(2)}`} />
+                    <Chip label={`Agg Return: ${(wfSummary.aggregated_return * 100).toFixed(1)}%`} />
+                    <Chip label={`Segments: ${wfSummary.segments.length}`} />
+                  </Box>
+                </Box>
               )}
             </Paper>
           </motion.div>

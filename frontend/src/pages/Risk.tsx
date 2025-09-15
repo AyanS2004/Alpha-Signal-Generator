@@ -3,10 +3,15 @@ import { Box, Typography, Paper, Grid, Alert, Chip } from '@mui/material';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, AreaChart, Area, BarChart, Bar } from 'recharts';
 import { motion } from 'framer-motion';
 import axios from 'axios';
+import { api, endpoints } from '../api';
+import { Button, TextField } from '@mui/material';
 
 const Risk: React.FC = () => {
   const [dashboardData, setDashboardData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
+  const [rlSize, setRlSize] = useState<number | null>(null);
+  const [tradeSize, setTradeSize] = useState<number>(10000);
+  const [estCost, setEstCost] = useState<number | null>(null);
 
   useEffect(() => {
     const fetchData = async () => {
@@ -24,6 +29,27 @@ const Risk: React.FC = () => {
 
     fetchData();
   }, []);
+
+  const computeRlSize = async () => {
+    try {
+      const { data } = await api.post(endpoints.rlPositionSize, {
+        market_state: [0.1, 0.2, 0.3],
+        portfolio_state: [0.05, 0.1],
+        signal_strength: 0.6,
+      });
+      setRlSize(data.position_size);
+    } catch {}
+  };
+
+  const estimateCost = async () => {
+    try {
+      const { data } = await api.post(endpoints.costsEstimate, {
+        trade_size: tradeSize,
+        market_conditions: { volatility: 0.2, regime: 'ranging', avg_volume: 1e6 },
+      });
+      setEstCost(data.estimated_cost);
+    } catch {}
+  };
 
   // Generate equity curve data from dashboard data
   const equityData = dashboardData?.equityData?.map((point: any, index: number) => ({
@@ -301,6 +327,28 @@ const Risk: React.FC = () => {
                   </Typography>
                 </Box>
               )}
+            </Paper>
+          </motion.div>
+        </Grid>
+
+        {/* RL Position Sizing and Cost Estimate */}
+        <Grid item xs={12} md={6}>
+          <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4 }}>
+            <Paper className="card p-5">
+              <Typography variant="h6" gutterBottom>Dynamic Position Sizing (RL) & Transaction Cost</Typography>
+              <Box sx={{ display: 'flex', gap: 2, alignItems: 'center', mb: 2 }}>
+                <Button variant="contained" onClick={computeRlSize}>Compute RL Position Size</Button>
+                {rlSize !== null && (
+                  <Chip label={`Size: ${(rlSize * 100).toFixed(1)}%`} color="primary" />
+                )}
+              </Box>
+              <Box sx={{ display: 'flex', gap: 2, alignItems: 'center' }}>
+                <TextField label="Trade Size ($)" size="small" type="number" value={tradeSize} onChange={(e) => setTradeSize(Number(e.target.value))} />
+                <Button variant="outlined" onClick={estimateCost}>Estimate Cost</Button>
+                {estCost !== null && (
+                  <Chip label={`Est. Cost: ${(estCost * 10000).toFixed(2)} bps`} color="secondary" />
+                )}
+              </Box>
             </Paper>
           </motion.div>
         </Grid>

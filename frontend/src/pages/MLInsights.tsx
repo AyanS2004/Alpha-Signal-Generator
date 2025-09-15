@@ -1,14 +1,17 @@
 import React, { useState, useEffect } from 'react';
-import { Box, Typography, Paper, Grid, Chip, Table, TableBody, TableCell, TableContainer, TableHead, TableRow } from '@mui/material';
+import { Box, Typography, Paper, Grid, Chip } from '@mui/material';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, CartesianGrid, LineChart, Line } from 'recharts';
 import { motion } from 'framer-motion';
 import axios from 'axios';
+import { api, endpoints } from '../api';
+import { Button } from '@mui/material';
 
 const MLInsights: React.FC = () => {
   const [signalsData, setSignalsData] = useState<any>(null);
   const [featureImportanceData, setFeatureImportanceData] = useState<any>(null);
   const [mlEvaluationData, setMlEvaluationData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
+  const [ensemble, setEnsemble] = useState<any>(null);
 
   useEffect(() => {
     const fetchData = async () => {
@@ -43,6 +46,14 @@ const MLInsights: React.FC = () => {
 
     fetchData();
   }, []);
+
+  const fitEnsemble = async () => {
+    try {
+      await api.post(endpoints.ensembleFit, { lookforward: 5 });
+      const { data } = await api.get(endpoints.ensemblePredict);
+      setEnsemble(data);
+    } catch {}
+  };
 
   // Use real feature importance data from ML model
   const featureImportances = featureImportanceData?.feature_importances || [];
@@ -245,6 +256,12 @@ const MLInsights: React.FC = () => {
           <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4, delay: 0.3 }}>
             <Paper className="card p-5">
               <Typography variant="h6" gutterBottom>Current Signal Analysis</Typography>
+              <Box sx={{ display: 'flex', gap: 2, mb: 2 }}>
+                <Button variant="outlined" onClick={fitEnsemble}>Fit Ensemble & Predict</Button>
+                {ensemble && (
+                  <Chip label={`Ensemble: ${(ensemble.final_prediction * 100).toFixed(1)}%`} color="primary" />
+                )}
+              </Box>
               <Grid container spacing={2}>
                 <Grid item xs={12}>
                   <Typography variant="subtitle1" gutterBottom>Current Market Regime</Typography>

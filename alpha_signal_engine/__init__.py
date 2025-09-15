@@ -21,6 +21,13 @@ from .config import Config
 from .engine import AlphaSignalEngine
 from .advanced_signals import AdvancedSignalGenerator
 
+# Advanced features
+from .bayesian_optimizer import BayesianOptimizer, AdvancedParameterOptimizer
+from .multi_timeframe_strategy import MultiTimeframeStrategy, MultiTimeframeSignal
+from .advanced_risk_manager import AdvancedRiskManager, PositionSizingResult
+from .performance_attributor import PerformanceAttributor, AdvancedMetricsCalculator
+from .ensemble_signal_generator import EnsembleSignalGenerator, EnsembleResult
+
 # Optional realtime import (websocket-client may not be installed)
 try:
     from .realtime_feed import RealTimeDataFeed, LiveSignalGenerator, MarketDataCache
@@ -40,6 +47,17 @@ __all__ = [
     "Config",
     "AlphaSignalEngine",
     "AdvancedSignalGenerator",
+    # Advanced features
+    "BayesianOptimizer",
+    "AdvancedParameterOptimizer",
+    "MultiTimeframeStrategy",
+    "MultiTimeframeSignal",
+    "AdvancedRiskManager",
+    "PositionSizingResult",
+    "PerformanceAttributor",
+    "AdvancedMetricsCalculator",
+    "EnsembleSignalGenerator",
+    "EnsembleResult",
 ]
 
 if _HAS_REALTIME:

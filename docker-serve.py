@@ -59,3 +59,5 @@ if __name__ == '__main__':
     print("✅ Backend started on port 5001")
     print("✅ Frontend starting on port 5000")
     run_frontend()
+
+

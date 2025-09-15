@@ -29,3 +29,5 @@ services:
       - type: rewrite
         source: /api/*
         destination: https://alpha-signal-backend.onrender.com/api/:splat
+
+

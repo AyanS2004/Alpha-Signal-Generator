@@ -6,30 +6,30 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Docker](https://img.shields.io/badge/docker-ready-blue.svg)](https://www.docker.com/)
 
-## 🚀 Key Features
+## Key Features
 
-### 🧠 Advanced Machine Learning
+### Advanced Machine Learning
 - **Random Forest Classifier** with feature importance analysis
 - **Dynamic Model Retraining** with hot-swapping capabilities
 - **Market Regime Detection** (trending, ranging, volatile)
 - **ML Confidence Scoring** and performance tracking
 - **Feature Engineering Pipeline** with 20+ technical indicators
 
-### 📊 Sophisticated Signal Processing
+### Sophisticated Signal Processing
 - **Kalman Filter** for price smoothing and noise reduction
 - **Context-Aware Signal Generation** matching backtesting logic
 - **Regime-Aware Signal Combination** with adaptive thresholds
 - **Real-time Feature Engineering** with rolling windows
 - **Stateful Market Simulation** with realistic transitions
 
-### ⚡ High-Performance Backtesting
+### High-Performance Backtesting
 - **Numba-accelerated** backtesting engine
 - **Realistic transaction costs** and slippage modeling
 - **Advanced risk metrics** (VaR, Beta, Alpha, Sharpe)
 - **Parameter optimization** with grid search
 - **Performance analytics** with drawdown analysis
 
-### 🌐 Production-Ready Architecture
+### Production-Ready Architecture
 - **RESTful API** with comprehensive endpoints
 - **React Dashboard** with real-time updates
 - **Thread-safe operations** with proper locking
@@ -37,7 +37,7 @@
 
 ---
 
-## 🎯 Quick Start
+## Quick Start
 
 ### Option A: Docker (Recommended)
 ```bash
@@ -77,7 +77,7 @@ python start_app.py
 
 ---
 
-## 🧠 Advanced ML Features
+## Advanced ML Features
 
 ### Machine Learning Insights Dashboard
 - **Feature Importance Analysis**: Real model feature importances from trained Random Forest
@@ -110,7 +110,7 @@ smoothed_price, velocity = filter.update(raw_price)
 
 ---
 
-## 📊 Risk Management & Analytics
+## Risk Management & Analytics
 
 ### Advanced Risk Metrics
 - **Value at Risk (VaR)**: 95% confidence interval risk assessment
@@ -128,7 +128,7 @@ smoothed_price, velocity = filter.update(raw_price)
 
 ---
 
-## 🔄 Real-Time Trading System
+## Real-Time Trading System
 
 ### Advanced Signal Generation
 ```python
@@ -160,7 +160,7 @@ feed.start_feed(on_signal_callback=on_signal)
 
 ---
 
-## 🌐 API Reference
+## API Reference
 
 ### Core Endpoints
 ```bash
@@ -191,6 +191,23 @@ GET /api/ml/evaluation              # Model performance metrics
 # Risk management
 GET /api/risk/metrics               # Risk metrics
 GET /api/risk/plots                 # Risk visualizations
+
+# Advanced optimization and analytics
+POST /api/optimize/bayesian         # Bayesian parameter optimization
+POST /api/walk-forward              # Walk-forward analysis
+POST /api/performance/attribution   # Performance attribution and advanced metrics
+
+# Ensemble and ML
+POST /api/ensemble/fit              # Fit stacking ensemble on current signals
+GET  /api/ensemble/predict          # Get ensemble prediction
+
+# Multi-timeframe and factors
+GET  /api/mtf/<symbol>              # Multi-timeframe analysis for a symbol
+POST /api/factors/pca               # Factor-based signals using PCA
+
+# RL and transaction costs
+POST /api/rl/position-size          # RL-based dynamic position sizing
+POST /api/costs/estimate            # Regime-aware transaction cost estimate
 ```
 
 ### Example API Usage

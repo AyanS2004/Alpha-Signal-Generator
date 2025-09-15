@@ -20,8 +20,16 @@ PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
-from alpha_signal_engine import AlphaSignalEngine, Config
+from alpha_signal_engine import (
+    AlphaSignalEngine, Config, BayesianOptimizer, AdvancedParameterOptimizer,
+    MultiTimeframeStrategy, AdvancedRiskManager, PerformanceAttributor,
+    AdvancedMetricsCalculator, EnsembleSignalGenerator
+)
 from alpha_signal_engine.visualizer import Visualizer
+from alpha_signal_engine.walk_forward import WalkForwardOptimizer
+from alpha_signal_engine.factor_strategy import FactorStrategy
+from alpha_signal_engine.rl_position_sizer import RLPositionSizer
+from alpha_signal_engine.transaction_costs import SmartTransactionCostModel
 import os
 
 app = Flask(__name__)
@@ -39,6 +47,17 @@ engine = None
 # Realtime globals
 ALPACA_FEED = None
 ALPACA_SYMBOL = None
+
+# Advanced features instances
+bayesian_optimizer = None
+multi_timeframe_strategy = None
+advanced_risk_manager = None
+performance_attributor = None
+ensemble_generator = None
+walk_forward_optimizer = WalkForwardOptimizer()
+factor_strategy = None
+rl_position_sizer = RLPositionSizer()
+tx_cost_model = SmartTransactionCostModel()
 
 # Settings file
 SETTINGS_FILE = os.path.join(os.path.dirname(__file__), 'settings.json')
@@ -1126,6 +1145,249 @@ def get_ml_evaluation():
         
     except Exception as e:
         logger.exception('ml_evaluation:error')
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/walk-forward', methods=['POST'])
+def walk_forward_api():
+    """Run walk-forward analysis on provided CSV path or last signals."""
+    try:
+        global walk_forward_optimizer
+        payload = request.json or {}
+        csv_path = payload.get('csvPath')
+        if csv_path and os.path.exists(csv_path):
+            df = pd.read_csv(csv_path)
+        else:
+            # Fallback to engine signals
+            global engine
+            if engine is None or engine.get_signals() is None:
+                return jsonify({'error': 'No data available'}), 400
+            df = engine.get_signals().reset_index()
+        result = walk_forward_optimizer.walk_forward_backtest(df)
+        return jsonify({
+            'aggregated_sharpe': result.aggregated_sharpe,
+            'aggregated_return': result.aggregated_return,
+            'segments': [
+                {
+                    'start_index': s.start_index,
+                    'end_index': s.end_index,
+                    'params': s.params,
+                    'sharpe_ratio': s.sharpe_ratio,
+                    'total_return': s.total_return
+                } for s in result.segments
+            ]
+        })
+    except Exception as e:
+        logger.exception('walk_forward:error')
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/factors/pca', methods=['POST'])
+def factors_pca_api():
+    """Run PCA factor strategy on a price matrix (symbols as columns)."""
+    try:
+        global factor_strategy
+        if factor_strategy is None:
+            factor_strategy = FactorStrategy(n_components=5)
+        payload = request.json or {}
+        price_matrix = pd.DataFrame(payload.get('price_matrix') or {})
+        if price_matrix.empty:
+            return jsonify({'error': 'price_matrix required'}), 400
+        signals = factor_strategy.generate(price_matrix)
+        return jsonify({
+            'factor_momentum': signals.factor_momentum,
+            'factor_mean_reversion': signals.factor_mean_reversion,
+            'combined_signal': signals.combined_signal
+        })
+    except Exception as e:
+        logger.exception('factors_pca:error')
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/rl/position-size', methods=['POST'])
+def rl_position_size_api():
+    """Get position size via RL agent (stubbed)."""
+    try:
+        global rl_position_sizer
+        payload = request.json or {}
+        market_state = np.array(payload.get('market_state', [0, 0, 0]), dtype=float)
+        portfolio_state = np.array(payload.get('portfolio_state', [0, 0]), dtype=float)
+        signal_strength = float(payload.get('signal_strength', 0.0))
+        size = rl_position_sizer.get_position_size(market_state, portfolio_state, signal_strength)
+        return jsonify({'position_size': size})
+    except Exception as e:
+        logger.exception('rl_position_size:error')
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/costs/estimate', methods=['POST'])
+def costs_estimate_api():
+    """Estimate transaction cost with regime-aware model."""
+    try:
+        global tx_cost_model
+        payload = request.json or {}
+        trade_size = float(payload.get('trade_size', 10000))
+        market_conditions = payload.get('market_conditions', {})
+        cost = tx_cost_model.calculate_transaction_cost(trade_size, market_conditions)
+        return jsonify({'estimated_cost': cost})
+    except Exception as e:
+        logger.exception('costs_estimate:error')
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/optimize/bayesian', methods=['POST'])
+def bayesian_optimize():
+    """Run Bayesian Optimization for engine parameters."""
+    try:
+        global engine, bayesian_optimizer
+        data = request.json or {}
+        csv_path = data.get('csvPath')
+        n_calls = int(data.get('nCalls', 50))
+        n_initial = int(data.get('nInitialPoints', 10))
+
+        if engine is None:
+            engine = AlphaSignalEngine()
+
+        bayesian_optimizer = BayesianOptimizer(engine, n_calls=n_calls, n_initial_points=n_initial)
+        result = bayesian_optimizer.optimize(csv_file_path=csv_path)
+
+        return jsonify({
+            'bestParams': result.best_params,
+            'bestSharpe': result.best_score,
+            'history': result.optimization_history[:50],
+            'convergence': result.convergence_plot_data,
+            'paramImportance': result.parameter_importance
+        })
+    except Exception as e:
+        logger.exception('bayesian_optimize:error')
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/mtf/<symbol>', methods=['GET'])
+def multi_timeframe(symbol: str):
+    """Multi-timeframe analysis for a symbol."""
+    try:
+        global multi_timeframe_strategy
+        period = request.args.get('period', '1y')
+        if multi_timeframe_strategy is None:
+            multi_timeframe_strategy = MultiTimeframeStrategy()
+        analysis = multi_timeframe_strategy.get_timeframe_analysis(symbol.upper(), period)
+        return jsonify(analysis)
+    except Exception as e:
+        logger.exception('multi_timeframe:error')
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/risk/position-size', methods=['POST'])
+def risk_position_size():
+    """Compute risk-adjusted position size given inputs."""
+    try:
+        global advanced_risk_manager
+        payload = request.json or {}
+        signal_strength = float(payload.get('signal_strength', 0.0))
+        current_portfolio = payload.get('current_portfolio', {})
+        market_data = payload.get('market_data', {})
+        trade_history = payload.get('trade_history', [])
+
+        if advanced_risk_manager is None:
+            advanced_risk_manager = AdvancedRiskManager()
+
+        res = advanced_risk_manager.calculate_position_size(
+            signal_strength=signal_strength,
+            current_portfolio=current_portfolio,
+            market_data=market_data,
+            trade_history=trade_history
+        )
+
+        return jsonify({
+            'position_size': res.position_size,
+            'risk_adjusted_size': res.risk_adjusted_size,
+            'kelly_size': res.kelly_size,
+            'max_position_size': res.max_position_size,
+            'risk_metrics': res.risk_metrics.__dict__,
+            'sizing_factors': res.sizing_factors
+        })
+    except Exception as e:
+        logger.exception('risk_position_size:error')
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/ensemble/fit', methods=['POST'])
+def ensemble_fit():
+    """Fit ensemble models using the engine's current signals."""
+    try:
+        global engine, ensemble_generator
+        if engine is None or engine.get_signals() is None:
+            return jsonify({'error': 'No signals available. Run a backtest first.'}), 400
+
+        signals = engine.get_signals()
+        if signals is None or signals.empty:
+            return jsonify({'error': 'Signals are empty'}), 400
+
+        if ensemble_generator is None:
+            ensemble_generator = EnsembleSignalGenerator(engine.config)
+
+        lookforward = int((request.json or {}).get('lookforward', 5))
+        ensemble_generator.fit(signals, lookforward=lookforward)
+        summary = ensemble_generator.get_ensemble_summary()
+        return jsonify({'status': 'fitted', 'summary': summary})
+    except Exception as e:
+        logger.exception('ensemble_fit:error')
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/ensemble/predict', methods=['GET'])
+def ensemble_predict():
+    """Get current ensemble prediction based on latest signals."""
+    try:
+        global engine, ensemble_generator
+        if ensemble_generator is None:
+            return jsonify({'error': 'Ensemble not fitted yet'}), 400
+
+        signals = engine.get_signals() if engine is not None else None
+        if signals is None or signals.empty:
+            return jsonify({'error': 'No signals available'}), 400
+
+        result = ensemble_generator.predict(signals)
+        return jsonify({
+            'final_prediction': result.final_prediction,
+            'base_predictions': result.base_predictions,
+            'meta_prediction': result.meta_prediction,
+            'confidence': result.confidence,
+            'model_weights': result.model_weights,
+            'feature_importance': result.feature_importance
+        })
+    except Exception as e:
+        logger.exception('ensemble_predict:error')
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/performance/attribution', methods=['POST'])
+def performance_attribution_api():
+    """Compute performance attribution and advanced metrics."""
+    try:
+        global performance_attributor
+        payload = request.json or {}
+        portfolio_returns = pd.Series(payload.get('portfolio_returns', []))
+        factor_exposures = {k: pd.Series(v) for k, v in (payload.get('factor_exposures', {}) or {}).items()}
+        factor_returns = {k: pd.Series(v) for k, v in (payload.get('factor_returns', {}) or {}).items()}
+        benchmark_returns = pd.Series(payload.get('benchmark_returns', [])) if payload.get('benchmark_returns') else None
+
+        analyzer = PerformanceAttributor()
+        result = analyzer.attribute_returns(
+            portfolio_returns=portfolio_returns,
+            factor_exposures=factor_exposures,
+            factor_returns=factor_returns,
+            benchmark_returns=benchmark_returns
+        )
+
+        metrics = AdvancedMetricsCalculator.calculate_all_metrics(portfolio_returns)
+
+        return jsonify({
+            'attribution': {
+                'total_return': result.total_return,
+                'factor_attribution': result.factor_attribution,
+                'alpha': result.alpha,
+                'beta': result.beta,
+                'information_coefficient': result.information_coefficient,
+                'hit_rate': result.hit_rate,
+                'factor_exposures': result.factor_exposures,
+                'factor_returns': result.factor_returns
+            },
+            'advanced_metrics': metrics.__dict__
+        })
+    except Exception as e:
+        logger.exception('performance_attribution:error')
         return jsonify({'error': str(e)}), 500
 
 if __name__ == '__main__':
