@@ -1,5 +1,4 @@
 services:
-  # Backend API Service
   - type: web
     name: alpha-signal-backend
     env: python
@@ -7,28 +6,20 @@ services:
     startCommand: python backend/app.py
     healthCheckPath: /api/health
     envVars:
-      - key: FLASK_ENV
-        value: production
       - key: PYTHONPATH
         value: /opt/render/project/src
-      # Add your Alpaca API keys here (optional)
-      # - key: ALPACA_API_KEY
-      #   value: your_api_key
-      # - key: ALPACA_SECRET_KEY
-      #   value: your_secret_key
+      - key: FLASK_ENV
+        value: production
 
-  # Frontend Static Site
   - type: web
     name: alpha-signal-frontend
     env: static
     buildCommand: cd frontend && npm ci || npm install && CI=false npm run build
     staticPublishPath: ./frontend/build
+    envVars:
+      - key: NODE_VERSION
+        value: 18
     routes:
       - type: rewrite
         source: /api/*
         destination: https://alpha-signal-backend.onrender.com/api/:splat
-    envVars:
-      - key: NODE_VERSION
-        value: 18
-
-
