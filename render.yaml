@@ -3,7 +3,6 @@ services:
   - type: web
     name: alpha-signal-backend
     env: python
-    plan: free
     buildCommand: pip install -r requirements.txt && pip install -r backend/requirements.txt && pip install -e .
     startCommand: python backend/app.py
     healthCheckPath: /api/health
@@ -19,10 +18,9 @@ services:
       #   value: your_secret_key
 
   # Frontend Static Site
-  - type: web
+  - type: static_site
     name: alpha-signal-frontend
     env: static
-    plan: free
     buildCommand: cd frontend && npm install && npm run build
     staticPublishPath: ./frontend/build
     routes:
