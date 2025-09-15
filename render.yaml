@@ -18,7 +18,7 @@ services:
       #   value: your_secret_key
 
   # Frontend Static Site
-  - type: static_site
+  - type: web
     name: alpha-signal-frontend
     env: static
     buildCommand: cd frontend && npm install && npm run build
