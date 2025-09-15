@@ -1,0 +1,37 @@
+version: '3.8'
+
+services:
+  alpha-signal:
+    build: .
+    ports:
+      - "5000:5000"
+    environment:
+      - FLASK_ENV=production
+      - PYTHONPATH=/app
+      # Add your Alpaca API keys here (optional)
+      # - ALPACA_API_KEY=your_api_key
+      # - ALPACA_SECRET_KEY=your_secret_key
+    volumes:
+      # Mount data directory for persistence
+      - ./data:/app/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # Optional: Add a database service for production
+  # postgres:
+  #   image: postgres:15-alpine
+  #   environment:
+  #     POSTGRES_DB: alpha_signal
+  #     POSTGRES_USER: alpha_signal
+  #     POSTGRES_PASSWORD: your_password
+  #   volumes:
+  #     - postgres_data:/var/lib/postgresql/data
+  #   restart: unless-stopped
+
+# volumes:
+#   postgres_data:

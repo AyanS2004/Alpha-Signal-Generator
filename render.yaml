@@ -1,0 +1,31 @@
+services:
+  # Backend API Service
+  - type: web
+    name: alpha-signal-backend
+    env: python
+    plan: free
+    buildCommand: pip install -r requirements.txt && pip install -r backend/requirements.txt && pip install -e .
+    startCommand: python backend/app.py
+    healthCheckPath: /api/health
+    envVars:
+      - key: FLASK_ENV
+        value: production
+      - key: PYTHONPATH
+        value: /opt/render/project/src
+      # Add your Alpaca API keys here (optional)
+      # - key: ALPACA_API_KEY
+      #   value: your_api_key
+      # - key: ALPACA_SECRET_KEY
+      #   value: your_secret_key
+
+  # Frontend Static Site
+  - type: web
+    name: alpha-signal-frontend
+    env: static
+    plan: free
+    buildCommand: cd frontend && npm install && npm run build
+    staticPublishPath: ./frontend/build
+    routes:
+      - type: rewrite
+        source: /api/*
+        destination: https://alpha-signal-backend.onrender.com/api/:splat

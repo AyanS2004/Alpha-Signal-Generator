@@ -467,3 +467,11 @@ class LiveSignalGenerator:
         if self.retraining_thread:
             self.retraining_thread.join(timeout=5)
         print("🛑 Live signal generator stopped")
+
+
+
+
+
+
+
+
