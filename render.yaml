@@ -21,11 +21,14 @@ services:
   - type: web
     name: alpha-signal-frontend
     env: static
-    buildCommand: cd frontend && npm install && npm run build
+    buildCommand: cd frontend && npm ci || npm install && CI=false npm run build
     staticPublishPath: ./frontend/build
     routes:
       - type: rewrite
         source: /api/*
         destination: https://alpha-signal-backend.onrender.com/api/:splat
+    envVars:
+      - key: NODE_VERSION
+        value: 18
 
 
